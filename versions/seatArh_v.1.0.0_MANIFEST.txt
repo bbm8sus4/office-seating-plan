@@ -1,0 +1,7 @@
+SeatMap — version snapshot: seatArh_v.1.0.0
+saved: 2026-07-06
+app APP_VERSION: 3.9.0 (in-app changelog)
+files: index.html (402825 bytes), _worker.js
+deploy: https://seatmap-bb85fd28.pages.dev (Cloudflare Pages, password-gated)
+state at snapshot: 49 people (WOOT/PHUM = owner), i18n TH/EN complete
+restore: cp this index.html -> dist/index.html then wrangler pages deploy dist

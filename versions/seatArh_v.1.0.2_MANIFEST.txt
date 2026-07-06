@@ -1,0 +1,11 @@
+seatArh_v.1.0.2 — 2026-07-06
+Checkpoint: full i18n TH/EN pass complete
+- Form labels (person/room/org/linkOrg) → data-i18n (18 labels + 2 wrapped * labels)
+- Dynamic modal titles → t() (mt.* keys, 6 sites)
+- Prefs page fully bilingual (pf.* keys, ~30 strings + renderPrefs lock/quota via t()/L())
+- applyLang now re-renders Prefs when active
+- Runtime messages: confirm(22)/alert(13)/toast(79) → L(th,en) helper (163 literal sites, 143 unique)
+- I18N.en keys: 254
+Verified via Chrome MCP (EN mode): only "ไทย" language button remains Thai (intentional).
+Data safe: 49 people / 5 rooms / 2 owners unchanged.
+Deploy: https://seatmap-bb85fd28.pages.dev

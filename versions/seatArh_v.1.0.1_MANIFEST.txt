@@ -1,0 +1,8 @@
+SeatMap — version snapshot: seatArh_v.1.0.1 (post-QA fixes)
+saved: 2026-07-06
+base: seatArh_v.1.0.0 + 8 bug fixes from real-user QA + modal button i18n
+fixes: blueprint hybrid/owner badge, owner->WFH guard, companyShort i18n, seat labels,
+       lock label consistency, migrateOrg col clamp, sync race (pull vs unpushed push),
+       empty-state i18n, modal action buttons (common.save/cancel/delete)
+deploy: https://seatmap-bb85fd28.pages.dev
+QA note: SecondBrain/01 Projects/Office Seating Plan/2026-07-06 QA*.md

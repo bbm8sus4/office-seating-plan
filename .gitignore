@@ -1,0 +1,7 @@
+# Cloudflare deploy secrets — keep out of public repo (gate password lives here)
+_worker.js
+*_worker.js
+wrangler.toml
+.wrangler/
+node_modules/
+.DS_Store
