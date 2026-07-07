@@ -84,5 +84,30 @@ export async function onRequest(context) {
   if (!timingSafeEqual(ph, eh)) return unauthorized();
 
   // authenticated → let the request continue to the static asset / API function
-  return context.next();
+  const res = await context.next();
+
+  // Force the HTML entry document to always revalidate so a new deploy reaches users immediately instead of a
+  // stale cached copy of the single-file app. We do this HERE (not in a _headers file) because every request
+  // flows through this middleware, and Pages `_headers` rules do NOT apply to responses a Function returns —
+  // context.next() makes this a Function response, so _headers would be ignored for it.
+  // Scope tightly: only the HTML document. API responses (/api/*) set their own Cache-Control and are left alone.
+  try {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const isHtml =
+      path === "/" ||
+      path.endsWith(".html") ||
+      (path.endsWith("/") && !path.startsWith("/api/")) ||
+      /text\/html/i.test(res.headers.get("Content-Type") || "");
+    if (isHtml && !path.startsWith("/api/")) {
+      // context.next() may return an immutable Response; clone into a mutable one before editing headers
+      const patched = new Response(res.body, res);
+      patched.headers.set("Cache-Control", "no-cache, must-revalidate");
+      return patched;
+    }
+  } catch (e) {
+    // never let a header tweak break the site — fall through to the untouched response
+    try { console.error("[gate] failed to set cache header", e && e.message); } catch (x) {}
+  }
+  return res;
 }
