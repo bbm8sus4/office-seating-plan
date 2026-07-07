@@ -83,31 +83,35 @@ export async function onRequest(context) {
   const [ph, eh] = await Promise.all([sha256Bytes(provided), sha256Bytes(expected)]);
   if (!timingSafeEqual(ph, eh)) return unauthorized();
 
-  // authenticated → let the request continue to the static asset / API function
-  const res = await context.next();
-
-  // Force the HTML entry document to always revalidate so a new deploy reaches users immediately instead of a
-  // stale cached copy of the single-file app. We do this HERE (not in a _headers file) because every request
-  // flows through this middleware, and Pages `_headers` rules do NOT apply to responses a Function returns —
-  // context.next() makes this a Function response, so _headers would be ignored for it.
-  // Scope tightly: only the HTML document. API responses (/api/*) set their own Cache-Control and are left alone.
+  // authenticated. Force the HTML entry document to always revalidate so a new deploy reaches users immediately
+  // instead of a stale cached copy of the single-file app.
+  //
+  // Why not just patch context.next()? For a STATIC asset, the header we set on context.next()'s response is
+  // dropped by Cloudflare's asset-serving pipeline (verified on the live edge — only genuine Function responses
+  // like /api/* keep their headers). The documented fix is to fetch the asset ourselves via env.ASSETS.fetch(),
+  // which yields a Function-OWNED response whose headers survive. We then set Cache-Control on that.
   try {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const isHtml =
+    const path = new URL(request.url).pathname;
+    const wantsHtml =
       path === "/" ||
+      path === "/index.html" ||
       path.endsWith(".html") ||
-      (path.endsWith("/") && !path.startsWith("/api/")) ||
-      /text\/html/i.test(res.headers.get("Content-Type") || "");
-    if (isHtml && !path.startsWith("/api/")) {
-      // context.next() may return an immutable Response; clone into a mutable one before editing headers
-      const patched = new Response(res.body, res);
+      (path.endsWith("/") && !path.startsWith("/api/"));
+    if (wantsHtml && !path.startsWith("/api/") && env && env.ASSETS) {
+      // fetch the SAME path (not always "/") so we never serve the wrong file; just normalize the
+      // /index.html → / that Cloudflare itself redirects, so we hit the served asset directly.
+      const assetUrl = new URL(request.url);
+      if (assetUrl.pathname === "/index.html") assetUrl.pathname = "/";
+      const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+      const patched = new Response(assetRes.body, assetRes);
       patched.headers.set("Cache-Control", "no-cache, must-revalidate");
       return patched;
     }
   } catch (e) {
-    // never let a header tweak break the site — fall through to the untouched response
-    try { console.error("[gate] failed to set cache header", e && e.message); } catch (x) {}
+    // never let the cache tweak break the site — fall through to the normal path
+    try { console.error("[gate] ASSETS cache-header path failed, falling back", e && e.message); } catch (x) {}
   }
-  return res;
+
+  // non-HTML, no ASSETS binding, or any failure above → normal passthrough (static asset or API function)
+  return context.next();
 }
