@@ -83,35 +83,13 @@ export async function onRequest(context) {
   const [ph, eh] = await Promise.all([sha256Bytes(provided), sha256Bytes(expected)]);
   if (!timingSafeEqual(ph, eh)) return unauthorized();
 
-  // authenticated. Force the HTML entry document to always revalidate so a new deploy reaches users immediately
-  // instead of a stale cached copy of the single-file app.
+  // authenticated → serve the request normally.
   //
-  // Why not just patch context.next()? For a STATIC asset, the header we set on context.next()'s response is
-  // dropped by Cloudflare's asset-serving pipeline (verified on the live edge — only genuine Function responses
-  // like /api/* keep their headers). The documented fix is to fetch the asset ourselves via env.ASSETS.fetch(),
-  // which yields a Function-OWNED response whose headers survive. We then set Cache-Control on that.
-  try {
-    const path = new URL(request.url).pathname;
-    const wantsHtml =
-      path === "/" ||
-      path === "/index.html" ||
-      path.endsWith(".html") ||
-      (path.endsWith("/") && !path.startsWith("/api/"));
-    if (wantsHtml && !path.startsWith("/api/") && env && env.ASSETS) {
-      // fetch the SAME path (not always "/") so we never serve the wrong file; just normalize the
-      // /index.html → / that Cloudflare itself redirects, so we hit the served asset directly.
-      const assetUrl = new URL(request.url);
-      if (assetUrl.pathname === "/index.html") assetUrl.pathname = "/";
-      const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
-      const patched = new Response(assetRes.body, assetRes);
-      patched.headers.set("Cache-Control", "no-cache, must-revalidate");
-      return patched;
-    }
-  } catch (e) {
-    // never let the cache tweak break the site — fall through to the normal path
-    try { console.error("[gate] ASSETS cache-header path failed, falling back", e && e.message); } catch (x) {}
-  }
-
-  // non-HTML, no ASSETS binding, or any failure above → normal passthrough (static asset or API function)
+  // NOTE on HTML freshness: we deliberately do NOT try to set Cache-Control here. Cloudflare Pages strips
+  // custom Cache-Control from any response that flows through its asset-serving pipeline (both context.next()
+  // and env.ASSETS.fetch() — verified on the live edge; only pure Function responses like /api/* keep theirs).
+  // It doesn't matter: this site is Basic-Auth gated, so every request carries an Authorization header and
+  // Pages treats it as non-cacheable to begin with. Freshness is handled by the ETag / If-None-Match → 304
+  // revalidation that Pages applies automatically, so a new deploy (new ETag) reaches users on their next load.
   return context.next();
 }
