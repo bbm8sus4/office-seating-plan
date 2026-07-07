@@ -219,6 +219,33 @@ body.view-dashboard .topbar-search,body.view-settings .topbar-search,body.view-o
 .drbar{height:8px;background:var(--track-cream);border-radius:6px;overflow:hidden;}
 .drfill{height:100%;background:var(--thunder);border-radius:6px;transition:width .3s;}
 .drfill.full{background:var(--easyslip);}
+/* ---- workload dashboard (phase 1) ---- */
+.wl-block{margin:0 0 20px;}
+.wl-h{font-size:15px;font-weight:900;letter-spacing:.2px;margin:0 0 12px;color:var(--ink);}
+.wl-chips{margin:0 0 14px;grid-template-columns:repeat(4,minmax(0,1fr));}
+@media(max-width:560px){.wl-chips{grid-template-columns:repeat(2,1fr);}}
+.wl-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 12px;}
+.wl-segwrap{display:inline-flex;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:2px;gap:2px;}
+.wl-seg{border:0;background:transparent;padding:6px 13px;border-radius:8px;font-weight:700;font-size:12px;color:var(--muted);cursor:pointer;}
+.wl-seg.on{background:var(--ink);color:var(--card);}
+.wl-search input{padding:7px 12px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--ink);font-size:12.5px;min-width:210px;}
+.wl-search input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px rgba(124,58,237,.15);}
+.wl-tablewrap{max-height:none;}
+.wl-tbl th:nth-child(2),.wl-tbl td:nth-child(2){width:1%;white-space:nowrap;text-align:center;}
+.wl-tbl td:nth-child(2){text-align:center;}
+.wl-tbl th:last-child,.wl-tbl td:last-child{width:180px;text-align:left;white-space:normal;}
+.wl-person{display:flex;align-items:center;gap:10px;min-width:0;}
+.pc-av.thunder{background:var(--thunder);} .pc-av.easyslip{background:var(--easyslip);} .pc-av.other{background:var(--other);}
+.wl-person .pc-av{width:32px;height:32px;border-radius:50%;flex:0 0 32px;display:inline-flex;align-items:center;justify-content:center;color:var(--on-accent);font-weight:800;font-size:13px;background-size:cover;background-position:center;}
+.wl-pmeta{min-width:0;}
+.wl-nm{font-weight:700;color:var(--ink);font-size:13px;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.wl-sub{color:var(--muted);font-size:11px;line-height:1.15;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.wl-count{font-size:14px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;}
+.wl-badges{display:flex;flex-wrap:wrap;gap:4px;}
+.wl-pbadge{background:var(--surface-2);color:var(--ink-2);border:1px solid var(--border);}
+.wl-dash{color:var(--faint);}
+.wl-bar{width:100%;min-width:120px;}
+.wl-empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13.5px;background:var(--card);border:1px solid var(--border);border-radius:12px;}
 .cmp{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
 .cmp:last-child{border-bottom:none;}
 .cdot{width:13px;height:13px;border-radius:50%;flex:0 0 auto;}
@@ -1046,6 +1073,13 @@ body.presentation-mode{background:var(--card);}
   .settings-tbl .p-full{white-space:normal;max-width:none;}
   .settings-tbl .p-actions{justify-content:flex-start;flex-wrap:wrap;width:100%;}
   .settings-tbl .p-actions::before{content:none;}
+  /* workload table shares .settings-tbl card view; reset its desktop nth-child widths for the stacked card */
+  .wl-tbl td:nth-child(2){width:auto;text-align:left;white-space:normal;justify-content:flex-start;}
+  .wl-tbl td:last-child{width:auto;}
+  .wl-bar{min-width:0;}
+  .wl-toolbar{flex-direction:column;align-items:stretch;}
+  .wl-search input{min-width:0;width:100%;}
+  .wl-segwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 
   /* [5] Org chart — collapse the fixed 5-col band grid to a single readable column (bands stack, no tiny cells) */
   .org{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -1079,8 +1113,7 @@ body.presentation-mode{background:var(--card);}
     <nav class="tabs">
       <a class="tab on" data-view="seating" onclick="setView('seating')" data-i18n="tab.seating">ผังที่นั่ง</a>
       <a class="tab" data-view="org" onclick="setView('org')" data-i18n="tab.org">ผังองค์กร</a>
-      <!-- ซ่อนชั่วคราวตามคำขอ 2026-07-03 · code แดชบอร์ดยังอยู่ครบ · เปิดกลับ = ลบ style="display:none" -->
-      <a class="tab" data-view="dashboard" onclick="setView('dashboard')" data-i18n="tab.dashboard" style="display:none">แดชบอร์ด</a>
+      <a class="tab" data-view="dashboard" onclick="setView('dashboard')" data-i18n="tab.dashboard">แดชบอร์ด</a>
       <a class="tab" data-view="product" onclick="setView('product')" data-i18n="tab.product">โปรดักส์</a>
       <a class="tab" data-view="settings" onclick="setView('settings')" data-i18n="tab.settings">จัดการ</a>
     </nav>
@@ -1241,6 +1274,7 @@ body.presentation-mode{background:var(--card);}
     <div><h1 data-i18n="dash.title">แดชบอร์ดบุคคล · HR</h1><div class="sub" data-i18n="dash.sub">ภาพรวมกำลังพล</div></div>
     <button class="primary tb-cta" onclick="exportDashboard()" title="พิมพ์หรือบันทึกเป็น PDF (เปิด Background graphics ในกล่องพิมพ์)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg><span class="lbl">พิมพ์ / Export PDF</span></button>
   </div>
+  <div id="workloadSection"></div>
   <div class="chips dash-chips" id="chips"></div>
   <div id="dashExtra"></div>
 </div>
@@ -1770,6 +1804,7 @@ const I18N={
   "views.btn":"มุมมอง","views.all":"มุมมอง: ทั้งหมด","views.save":"บันทึกเป็น view","views.custom":"มุมมอง: กำหนดเอง",
   "legend.empty":"ว่าง","legend.reserved":"จองไว้","legend.wfh":"ทำงานออนไลน์ · WFH","legend.emptype":"PT พาร์ทไทม์ · FL ฟรีแลนซ์ · INT ฝึกงาน","badge.new":"ใหม่","seat.empty":"ว่าง","seat.reserved":"จอง",
   "dash.title":"แดชบอร์ดบุคคล · HR","dash.sub":"ภาพรวมกำลังพล Thunder Solution · Easy Slip — ชั้น 2",
+  "wl.title":"ภาระงาน — ใครอยู่โปรดักส์ไหนบ้าง","wl.chip.has":"มีโปรดักส์","wl.chip.none":"ยังไม่มีโปรดักส์","wl.chip.multi":"อยู่ 2+ โปรดักส์","wl.chip.max":"โหลดสูงสุด (โปรดักส์)","wl.f.all":"ทั้งหมด","wl.f.0":"0","wl.f.1":"1","wl.f.2":"2+","wl.f.3":"3+","wl.searchph":"ค้นหา ชื่อ / ตำแหน่ง / โปรดักส์","wl.col.person":"พนักงาน","wl.col.count":"จำนวนโปรดักส์","wl.col.products":"โปรดักส์","wl.col.load":"ภาระงาน","wl.empty":"ยังไม่มีใครถูกกำหนดเข้าโปรดักส์ — เพิ่มคนเข้าเลนในหน้าโปรดักส์ก่อน","wl.nomatch":"ไม่พบพนักงานที่ตรงเงื่อนไข",
   "hr.headcount":"อัตรากำลังรวม","hr.active":"ทำงานปกติ","hr.newhire":"พนักงานใหม่","hr.awaiting":"รอจัดโต๊ะ","hr.reserved":"โต๊ะจองไว้","hr.avgteam":"ขนาดทีมเฉลี่ย","hr.seated":"มีโต๊ะแล้ว",
   "hr.startin":"เริ่มอีก {d} วัน","hr.starttoday":"เริ่มวันนี้","hr.startedago":"เริ่มมาแล้ว {d} วัน","hr.nodesk":"ยังไม่จองโต๊ะ","hr.alldesk":"ทุกคนมีโต๊ะแล้ว","hr.reservedfor":"โต๊ะที่จองไว้:","hr.noteam":"(ไม่ระบุทีม)",
   "hr.panel.onboarding":"Onboarding & ความพร้อมรับเข้า","hr.panel.status":"สถานะกำลังพล","hr.panel.brand":"แยกตามบริษัท","hr.panel.team":"โครงสร้างทีม (ประมาณ span)","hr.panel.tenure":"อายุงาน","hr.panel.coloc":"แบรนด์ต่อห้อง",
@@ -1799,6 +1834,7 @@ const I18N={
   "views.btn":"View","views.all":"View: All","views.save":"Save as view","views.custom":"View: Custom",
   "legend.empty":"Empty","legend.reserved":"Reserved","legend.wfh":"Remote · WFH","legend.emptype":"PT Part-time · FL Freelance · INT Intern","badge.new":"NEW","seat.empty":"EMPTY","seat.reserved":"HOLD",
   "dash.title":"HR Dashboard","dash.sub":"Workforce overview · Thunder Solution · Easy Slip — Floor 2",
+  "wl.title":"Workload — who’s on which products","wl.chip.has":"Has products","wl.chip.none":"No products yet","wl.chip.multi":"On 2+ products","wl.chip.max":"Max load (products)","wl.f.all":"All","wl.f.0":"0","wl.f.1":"1","wl.f.2":"2+","wl.f.3":"3+","wl.searchph":"Search name / role / product","wl.col.person":"Employee","wl.col.count":"Products","wl.col.products":"Products","wl.col.load":"Workload","wl.empty":"No one is assigned to a product yet — add people to lanes in the Products view first","wl.nomatch":"No employees match the filter",
   "hr.headcount":"Total headcount","hr.active":"Active","hr.newhire":"New hires","hr.awaiting":"Awaiting desk","hr.reserved":"Reserved desks","hr.avgteam":"Avg team size","hr.seated":"Seated",
   "hr.startin":"starts in {d}d","hr.starttoday":"starts today","hr.startedago":"{d}d in role","hr.nodesk":"no desk yet","hr.alldesk":"Everyone has a desk","hr.reservedfor":"Reserved for:","hr.noteam":"(no team)",
   "hr.panel.onboarding":"Onboarding & readiness","hr.panel.status":"Workforce status","hr.panel.brand":"Headcount by company","hr.panel.team":"Team composition (span proxy)","hr.panel.tenure":"Tenure","hr.panel.coloc":"Brand by room",
@@ -2429,6 +2465,68 @@ function renderChips(){
   ];
   el.innerHTML=tiles.map(c=>'<div class="chip '+c[2]+'"><div class="n">'+c[0]+'</div><div class="l">'+c[1]+'</div></div>').join("");
 }
+/* ---- Workload dashboard (phase 1): who is on which products, ranked by product count ---- */
+let workloadFilter="all", workloadSearch="";
+// count = number of UNIQUE, still-existing products a person is assigned to (dedup + drop refs to deleted products)
+function _personProducts(p){
+  const seen=new Set(), out=[];
+  (p.products||[]).forEach(a=>{ if(!a||!a.product||seen.has(a.product))return; const pr=(state.products||[]).find(x=>x.id===a.product); if(!pr)return; seen.add(a.product); out.push(pr); });
+  return out; // array of product objects
+}
+function _workloadFilterMatch(count){
+  switch(workloadFilter){ case "0":return count===0; case "1":return count===1; case "2":return count>=2; case "3":return count>=3; default:return true; }
+}
+function renderWorkload(){
+  const host=document.getElementById("workloadSection"); if(!host)return;
+  const P=(state.people||[]).filter(p=>p.status!=="owner"); // owners aren't counted as employees (matches HR dashboard + headcount convention)
+  const rows=P.map(p=>({p,prods:_personProducts(p)}));
+  const withCount=rows.map(r=>({...r,count:r.prods.length}));
+  const maxWork=withCount.reduce((mx,r)=>Math.max(mx,r.count),0);
+  const nHas=withCount.filter(r=>r.count>=1).length;
+  const nNone=withCount.filter(r=>r.count===0).length;
+  const nMulti=withCount.filter(r=>r.count>=2).length;
+  // ---- summary chips (reuse .dash-chips/.chip) ----
+  const chip=(n,label,accent)=>'<div class="chip'+(accent?" accent":"")+'"><div class="l">'+label+'</div><div class="n">'+n+'</div></div>';
+  const chips='<div class="chips dash-chips wl-chips">'+
+    chip(nHas,t("wl.chip.has"))+chip(nNone,t("wl.chip.none"))+chip(nMulti,t("wl.chip.multi"),nMulti>0)+chip(maxWork,t("wl.chip.max"))+'</div>';
+  // ---- filter + search bar ----
+  const segs=[["all","wl.f.all"],["0","wl.f.0"],["1","wl.f.1"],["2","wl.f.2"],["3","wl.f.3"]]
+    .map(([v,k])=>'<button class="wl-seg'+(workloadFilter===v?" on":"")+'" onclick="setWorkloadFilter(\''+v+'\')">'+t(k)+'</button>').join("");
+  const bar='<div class="wl-toolbar"><div class="wl-segwrap">'+segs+'</div>'+
+    '<div class="wl-search"><input type="search" id="wlSearch" maxlength="60" placeholder="'+escapeHtml(t("wl.searchph"))+'" oninput="_wlSearchInput(this.value)" value="'+escapeHtml(workloadSearch)+'"></div></div>';
+  // ---- apply filter + search ----
+  const q=workloadSearch.trim().toLowerCase();
+  let view=withCount.filter(r=>_workloadFilterMatch(r.count));
+  if(q){ view=view.filter(r=>{ const p=r.p; const hay=[(p.nickname||""),(p.fullName||""),(p.role||""),(p.team||""),...r.prods.map(pr=>pr.name||"")].join(" ").toLowerCase(); return hay.indexOf(q)>=0; }); }
+  view.sort((a,b)=> b.count-a.count || (a.p.nickname||"").localeCompare(b.p.nickname||""));
+  // ---- table / empty state ----
+  let body;
+  if(!withCount.some(r=>r.count>0) && workloadFilter==="all" && !q){
+    body='<div class="wl-empty">'+t("wl.empty")+'</div>';
+  } else if(!view.length){
+    body='<div class="wl-empty">'+t("wl.nomatch")+'</div>';
+  } else {
+    const trs=view.map(r=>{
+      const p=r.p;
+      const av='<span class="pc-av '+companyClass(p.company)+'"'+((p.photo&&/^data:image\//.test(p.photo))?(' style="'+_photoBg(p.photo,"")+'"'):'')+'>'+(p.photo?'':escapeHtml((p.nickname||"?").charAt(0)))+'</span>';
+      const nameCell='<div class="wl-person">'+av+'<div class="wl-pmeta"><div class="wl-nm">'+escapeHtml(p.nickname||"—")+'</div>'+((p.role||p.team)?('<div class="wl-sub">'+escapeHtml([p.role,p.team].filter(Boolean).join(" · "))+'</div>'):'')+'</div></div>';
+      const badges=r.prods.length?r.prods.map(pr=>'<span class="badge wl-pbadge">'+escapeHtml(pr.name||pr.id)+'</span>').join(""):'<span class="wl-dash">—</span>';
+      const pct=maxWork?Math.round(r.count/maxWork*100):0;
+      const barCell='<div class="drbar wl-bar"><div class="drfill" style="width:'+pct+'%"></div></div>';
+      return '<tr>'+
+        '<td data-label="'+escapeHtml(t("wl.col.person"))+'">'+nameCell+'</td>'+
+        '<td data-label="'+escapeHtml(t("wl.col.count"))+'"><span class="wl-count">'+r.count+'</span></td>'+
+        '<td data-label="'+escapeHtml(t("wl.col.products"))+'"><div class="wl-badges">'+badges+'</div></td>'+
+        '<td data-label="'+escapeHtml(t("wl.col.load"))+'">'+barCell+'</td>'+
+        '</tr>';
+    }).join("");
+    const head='<thead><tr>'+["wl.col.person","wl.col.count","wl.col.products","wl.col.load"].map(k=>'<th>'+t(k)+'</th>').join("")+'</tr></thead>';
+    body='<div class="settings-tablewrap wl-tablewrap"><table class="settings-tbl wl-tbl">'+head+'<tbody>'+trs+'</tbody></table></div>';
+  }
+  host.innerHTML='<div class="wl-block"><h3 class="wl-h">'+t("wl.title")+'</h3>'+chips+bar+body+'</div>';
+}
+function setWorkloadFilter(v){ workloadFilter=v; renderWorkload(); }
+function _wlSearchInput(v){ workloadSearch=v; renderWorkload(); const el=document.getElementById("wlSearch"); if(el){el.focus();try{const n=el.value.length;el.setSelectionRange(n,n);}catch(e){}} }
 function renderDashboard(){
   const ex=document.getElementById("dashExtra"); if(!ex)return;
   const m=computeHR(), P=m.P;
@@ -2942,7 +3040,7 @@ function render(){
   }
   renderBanners(); renderSlimHero();
   try{
-    if(view==="dashboard"){ renderChips(); renderDashboard(); }
+    if(view==="dashboard"){ renderWorkload(); renderChips(); renderDashboard(); }
     else if(view==="product") renderProducts();
     else if(view==="settings") renderSettings();
     else if(view==="org"){ renderOrg(); requestAnimationFrame(drawOrgLinks); }
