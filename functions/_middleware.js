@@ -83,13 +83,40 @@ export async function onRequest(context) {
   const [ph, eh] = await Promise.all([sha256Bytes(provided), sha256Bytes(expected)]);
   if (!timingSafeEqual(ph, eh)) return unauthorized();
 
-  // authenticated → serve the request normally.
-  //
-  // NOTE on HTML freshness: we deliberately do NOT try to set Cache-Control here. Cloudflare Pages strips
-  // custom Cache-Control from any response that flows through its asset-serving pipeline (both context.next()
-  // and env.ASSETS.fetch() — verified on the live edge; only pure Function responses like /api/* keep theirs).
-  // It doesn't matter: this site is Basic-Auth gated, so every request carries an Authorization header and
-  // Pages treats it as non-cacheable to begin with. Freshness is handled by the ETag / If-None-Match → 304
-  // revalidation that Pages applies automatically, so a new deploy (new ETag) reaches users on their next load.
+  // authenticated. For the HTML entry document we try approach (b): build a FULLY OWN Response from the asset
+  // bytes (read into a buffer, brand-new Response with our own headers) rather than passing the asset response
+  // through. Hypothesis: a response whose body is our buffer — not piped from the asset server — is treated as
+  // a pure Function response (like /api/*), so Cloudflare won't strip our Cache-Control.
+  // This is the tie-breaker probe: if `Cache-Control: no-store` survives on the live edge, cache-busting works;
+  // if it's still stripped, path-based classification is confirmed and revert is the final answer.
+  try {
+    const path = new URL(request.url).pathname;
+    const wantsHtml =
+      path === "/" ||
+      path === "/index.html" ||
+      path.endsWith(".html") ||
+      (path.endsWith("/") && !path.startsWith("/api/"));
+    if (wantsHtml && !path.startsWith("/api/") && env && env.ASSETS) {
+      const assetUrl = new URL(request.url);
+      if (assetUrl.pathname === "/index.html") assetUrl.pathname = "/";
+      const assetRes = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+      // only rewrite actual HTML 200s; anything else (redirect/404/etc) → let it pass through untouched
+      const ct = assetRes.headers.get("Content-Type") || "";
+      if (assetRes.status === 200 && /text\/html/i.test(ct)) {
+        const body = await assetRes.arrayBuffer(); // buffer the ~460KB doc so the new Response owns its body
+        const headers = new Headers();
+        headers.set("Content-Type", ct);
+        const etag = assetRes.headers.get("ETag");
+        if (etag) headers.set("ETag", etag); // keep ETag so 304 revalidation still works
+        headers.set("Cache-Control", "no-store");
+        return new Response(body, { status: 200, headers });
+      }
+      return assetRes; // non-HTML-200 from ASSETS → pass through as-is
+    }
+  } catch (e) {
+    try { console.error("[gate] pure-function HTML probe failed, falling back", e && e.message); } catch (x) {}
+  }
+
+  // non-HTML, no ASSETS binding, or any failure above → normal passthrough
   return context.next();
 }
