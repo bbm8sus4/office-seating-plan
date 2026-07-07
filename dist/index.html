@@ -3253,15 +3253,32 @@ function savePerson(){
   );
 }
 // clear a deleted person's org-chart links so nodes don't keep showing stale baked-in names
+// Strip a specific person's org links across ALL org stores (active + others). Returns true if the ACTIVE
+// store's save succeeded (or nothing to do); false if the active store was touched but saveOrg() failed —
+// so the caller knows a ghost link may still be persisted and can run the repair pass.
 function _unlinkPersonFromAllOrg(pid){
-  let activeTouched=false;
+  let activeTouched=false, activeOk=true;
   if((orgState.nodes||[]).some(n=>n.personId===pid))pushOrgUndo(); // let org-Undo restore the link
   (orgState.nodes||[]).forEach(n=>{if(n.personId===pid){n.personId=undefined;activeTouched=true;}});
-  if(activeTouched)saveOrg();
+  if(activeTouched)activeOk=saveOrg();
   Object.keys(ORG_DEFS).forEach(c=>{
     if(ORG_DEFS[c].key===orgDef().key)return; // active store already handled
     try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(!raw)return;const obj=JSON.parse(raw);let t2=false;(obj.nodes||[]).forEach(n=>{if(n.personId===pid){n.personId=undefined;t2=true;}});if(t2)localStorage.setItem(ORG_DEFS[c].key,JSON.stringify(obj));}catch(e){}
   });
+  return activeOk;
+}
+// Repair pass: strip any org personId (across every store) that no longer exists in the directory (state.people).
+// Safety net so a failed/partial delete-unlink can't leave "ghost" org nodes pointing at deleted people.
+// Returns the number of links cleaned in the ACTIVE store (so callers can decide whether to persist/re-render).
+function repairOrgPersonLinks(){
+  const live=new Set((state.people||[]).map(p=>p.id));
+  let activeFixed=0;
+  (orgState.nodes||[]).forEach(n=>{ if(n.personId&&!live.has(n.personId)){ n.personId=undefined; activeFixed++; } });
+  Object.keys(ORG_DEFS).forEach(c=>{
+    if(ORG_DEFS[c].key===orgDef().key)return; // active handled in-memory above
+    try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(!raw)return;const obj=JSON.parse(raw);let t2=false;(obj.nodes||[]).forEach(n=>{if(n.personId&&!live.has(n.personId)){n.personId=undefined;t2=true;}});if(t2)localStorage.setItem(ORG_DEFS[c].key,JSON.stringify(obj));}catch(e){}
+  });
+  return activeFixed;
 }
 function deletePerson(){
   if(isLocked){toast(T_LOCKED);return;}
@@ -3270,7 +3287,14 @@ function deletePerson(){
   const pid=editingPersonId;
   _withSaveRollback(
     ()=>{ state.people=state.people.filter(p=>p.id!==pid); },
-    ()=>{ _unlinkPersonFromAllOrg(pid); render(); closeModal("personModal"); toast(L("ลบแล้ว","Deleted")); }
+    ()=>{
+      // person is gone from the directory (persisted). Now clear its org links; if that save failed OR any
+      // link somehow survives, run the repair pass + persist so no ghost org node points at the deleted person.
+      const unlinkOk=_unlinkPersonFromAllOrg(pid);
+      const stillGhost=(orgState.nodes||[]).some(n=>n.personId===pid);
+      if(!unlinkOk||stillGhost){ if(repairOrgPersonLinks()>0){ saveOrg(); } }
+      render(); renderOrg(); closeModal("personModal"); toast(L("ลบแล้ว","Deleted"));
+    }
   );
 }
 function toggleNewHire(id,ev){
@@ -3996,6 +4020,9 @@ function saveOrgNode(){
   const en=stripEmoji(document.getElementById("o_en").value);
   const company=document.getElementById("o_company").value;
   let personId=document.getElementById("o_personId")?document.getElementById("o_personId").value:"";
+  // snapshot org BEFORE any mutation (incl. clearing a conflicting link below) so a later saveOrg() failure
+  // rolls back to the TRUE pre-edit org — otherwise the moved-away link would be lost in-memory even though nothing persisted.
+  const orgSnap=JSON.stringify(orgState);
   if(personId){
     const conflict=orgState.nodes.find(x=>x.personId===personId&&x.id!==editingOrgId);
     if(conflict){if(!confirm(L("บุคคลนี้ผูกอยู่กับ '","This person is linked to '")+conflict.name+L("' แล้ว ย้ายมาผูกโหนดนี้แทน?","' already — move the link to this node instead?")))return;conflict.personId=undefined;}
@@ -4014,14 +4041,42 @@ function saveOrgNode(){
     }
   }
   const data={name,th:stripEmoji(document.getElementById("o_th").value),en,company,lv,col,p:document.getElementById("o_p").value||undefined,backupId:document.getElementById("o_backup").value||undefined,critical:document.getElementById("o_critical").checked,personId:personId||undefined};
-  const snap=JSON.stringify(orgState);
+  // TRANSACTION: the directory (state.people) is the source of truth — so materialize+persist the NEW person
+  // FIRST. Only once the person is safely saved do we link the org node. This guarantees an org node never
+  // references a personId that isn't in the directory (the "ghost reference" bug). Roll back on any failure.
+  const stateSnapBeforePerson=snapshot(); // directory pre-person; used to undo the add when nothing was persisted
+  let stateSnapPersonPersisted=null;       // directory WITH the person, as persisted; used when a later rollback-save fails
+  if(pendingNewPerson){
+    state.people.push(pendingNewPerson);
+    if(!save()){ // couldn't persist the new directory person → abort, don't touch the org chart at all
+      try{state=JSON.parse(stateSnapBeforePerson);}catch(e){}
+      render();
+      toastError(L("เพิ่มคนเข้าหน้าจัดการไม่สำเร็จ (พื้นที่เต็ม?) — ยังไม่ผูกผังองค์กร","Couldn’t add the person to Manage (storage full?) — org link not made"));
+      return;
+    }
+    stateSnapPersonPersisted=snapshot(); // person is now on disk — remember this exact shape to fall back to if rollback can't un-persist it
+  }
+  // person is in the directory now → link the org node
   pushOrgUndo();
   if(editingOrgId){ Object.assign(orgState.nodes.find(x=>x.id===editingOrgId),data); }
   else { data.id="o-"+Math.random().toString(36).slice(2,8); orgState.nodes.push(data); }
-  const _ok=saveOrg(); if(!_ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();requestAnimationFrame(drawOrgLinks);return;}
-  // org saved OK → materialize the new employee into Manage (state) and persist
-  if(pendingNewPerson){ state.people.push(pendingNewPerson); if(!save()){toastError("ผูกเข้าหน้าจัดการไม่สำเร็จ ลองใหม่อีกครั้ง");} render(); }
-  renderOrg(); requestAnimationFrame(drawOrgLinks); closeModal("orgModal"); toast(pendingNewPerson?(T_SAVED+L(" · เพิ่มเข้าหน้าจัดการแล้ว"," · added to Manage")):T_SAVED);
+  const _ok=saveOrg();
+  if(!_ok){ // org save failed → roll back the org chart AND the person we just added (keep both stores consistent)
+    try{orgState=JSON.parse(orgSnap);}catch(e){}
+    if(pendingNewPerson){
+      state.people=state.people.filter(p=>p.id!==pendingNewPerson.id);
+      if(!save()){ // rollback-save ALSO failed → the person is STILL persisted on disk. Memory must match what's
+        // persisted (person PRESENT), not our intent (removed) — otherwise a reload resurrects a person the user
+        // couldn't see to delete. Keep them visible in Manage and tell the user to remove the duplicate manually.
+        try{state=JSON.parse(stateSnapPersonPersisted);}catch(e){}
+        toastError(L("บันทึกผังไม่สำเร็จ และย้อนคนออกไม่สำเร็จ (พื้นที่เต็ม?) — คนถูกเพิ่มในหน้าจัดการแล้ว ลบเองได้เลย","Org save failed and couldn’t undo the add (storage full?) — the person is in Manage; please delete them there"));
+      }
+      render();
+    }
+    renderOrg(); requestAnimationFrame(drawOrgLinks);
+    return;
+  }
+  render(); renderOrg(); requestAnimationFrame(drawOrgLinks); closeModal("orgModal"); toast(pendingNewPerson?(T_SAVED+L(" · เพิ่มเข้าหน้าจัดการแล้ว"," · added to Manage")):T_SAVED);
 }
 function deleteOrgNode(){
   if(isLocked){toast(T_LOCKED);return;}
