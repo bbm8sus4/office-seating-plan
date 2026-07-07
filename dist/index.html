@@ -698,7 +698,7 @@ body:not(.view-org):not(.view-dashboard):not(.view-product):not(.view-settings) 
 .hero .sub{font-size:12px;color:var(--muted);margin-top:2px;}
 .hero .saved{font-size:11px;color:var(--muted);}
 .hero .saved b{color:var(--easyslip);}
-/* ===== Top-nav status cluster (v2.8.2) ===== */
+/* ===== Top-nav status cluster (v2.8.3) ===== */
 .topbar-status{display:contents;font-variant-numeric:tabular-nums;} /* wrapper collapses so empty status adds no gap; badges become direct flex items */
 .ts-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;font-size:11px;font-weight:800;border-radius:999px;line-height:1;}
 .ts-badge .ic{width:12px;height:12px;}
@@ -1000,6 +1000,58 @@ body.presentation-mode{background:var(--card);}
   body.view-dashboard .dash-card{box-shadow:none;border-color:#ddd;page-break-inside:avoid;break-inside:avoid;}
   body.view-dashboard .donut,body.view-dashboard .split-seg,body.view-dashboard .stack-seg,body.view-dashboard .drfill,body.view-dashboard .chip{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   @page{size:A3 landscape;margin:12mm;}
+}
+
+/* ===== MOBILE responsive fixes (v2.8.3) — phone layout, desktop untouched ===== */
+@media(max-width:640px){
+  /* [1] Topbar — allow the header to wrap onto multiple tidy rows instead of a cramped horizontal scroll */
+  .topbar-inner{flex-wrap:wrap;overflow-x:visible;gap:8px 10px;padding:8px 14px;}
+  .tabs{order:2;flex:1 1 100%;gap:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-left:0;}
+  .topbar-search{order:3;flex:1 1 100%;min-width:0;}
+  .topbar-history{order:1;margin-left:auto;}
+  .topbar-utils{order:1;flex:0 0 auto;}
+  .tab.on::after{bottom:-6px;}
+
+  /* [2] Floor plan / app grid — single column, plan scrolls horizontally within its own box if still wide */
+  .app{grid-template-columns:1fr;gap:14px;}
+  .sidebar{position:static;flex-direction:row;flex-wrap:wrap;}
+  .sidebar .panel{flex:1 1 240px;min-width:0;}
+  .plan{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .corridor.top .grid,.corridor.bottom .grid{grid-template-columns:1fr;}
+
+  /* [3] Seat cards / room boxes — stack room bands vertically, tighten seat size so avatars don't overflow */
+  .band{flex-direction:column;}
+  .furn-zone{flex:0 0 auto;border-right:0;border-bottom:1px solid var(--room-hair);max-height:120px;}
+  .rmbox{border-right:0;border-bottom:1px solid var(--room-hair);}
+  .rmbox:last-child{border-bottom:0;}
+  .seats{gap:12px 6px;}
+  .seat{width:56px;}
+  .seat .nm,.seat .rl{max-width:56px;}
+  .av{width:40px;height:40px;font-size:14px;}
+
+  /* [4] Employee directory — collapse the wide table into stacked cards (labels via data-label) */
+  .settings-tablewrap{overflow:visible;max-height:none;border:0;background:transparent;box-shadow:none;}
+  .settings-tbl{min-width:0;display:block;}
+  .settings-tbl thead{display:none;}
+  .settings-tbl tbody{display:block;}
+  .settings-tbl tbody tr{display:block;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 2px 8px var(--shadow-sm);padding:10px 12px;margin-bottom:12px;}
+  .settings-tbl tbody tr:nth-child(even){background:var(--card);}
+  .settings-tbl tbody tr:hover{background:var(--card);}
+  .settings-tbl tbody tr:last-child td{border-bottom:1px solid var(--border);}
+  .settings-tbl td{display:flex;align-items:center;gap:10px;height:auto;min-height:0;padding:7px 0;border-bottom:1px solid var(--border);width:auto;white-space:normal;text-align:left;}
+  /* override desktop's `.settings-tbl td:last-child{width:1%;white-space:nowrap;text-align:right}` (same specificity, so reset all 3 props here) */
+  .settings-tbl td:last-child{width:auto;white-space:normal;text-align:left;justify-content:flex-start;border-bottom:0;}
+  .settings-tbl td:first-child{min-width:0;padding-top:2px;}
+  .settings-tbl td[data-label]::before{content:attr(data-label);flex:0 0 92px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);}
+  .settings-tbl .p-full{white-space:normal;max-width:none;}
+  .settings-tbl .p-actions{justify-content:flex-start;flex-wrap:wrap;width:100%;}
+  .settings-tbl .p-actions::before{content:none;}
+
+  /* [5] Org chart — collapse the fixed 5-col band grid to a single readable column (bands stack, no tiny cells) */
+  .org{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .brow{grid-template-columns:1fr;gap:8px;}
+  .blabel{writing-mode:horizontal-tb;transform:none;flex:0 0 auto;width:100%;padding:5px 8px;font-size:10px;letter-spacing:.5px;}
+  .band .blabel{border-radius:5px 5px 0 0;}
 }
 </style>
 </head>
@@ -3941,10 +3993,10 @@ function renderSettings(){
   const rows=people.map(p=>{const avStyle=(p.photo&&/^data:image\//.test(p.photo))?("background:#000 url('"+encodeURI(p.photo).replace(/'/g,"%27")+"') center/cover"):('background:'+companyColor(p.company));const av='<div class="p-av" style="'+avStyle+'">'+(p.photo?"":escapeHtml((p.nickname||"?").charAt(0)))+'</div>';
     return '<tr>'+
       '<td><div class="p-nameclick" style="display:flex;gap:10px;align-items:center;" onclick="openBlueprint('+attr(p.id)+')" title="ดูข้อมูลเชิงลึก · Blueprint">'+av+'<div style="min-width:0">'+'<div class="p-nick">'+escapeHtml(p.nickname||"")+'</div>'+(p.fullName?('<div class="p-full">'+escapeHtml(p.fullName)+'</div>'):'')+'</div></div></td>'+
-      '<td>'+escapeHtml(p.role||"—")+(p.task?('<div class="p-sub">'+escapeHtml(p.task)+'</div>'):"")+'</td>'+
-      '<td>'+coBadge(p.company)+'</td>'+
-      '<td>'+empBadge(p.employment||"fulltime")+'</td>'+
-      '<td>'+placementLabel(p)+'</td>'+
+      '<td data-label="'+escapeHtml(t("set.col.role"))+'">'+escapeHtml(p.role||"—")+(p.task?('<div class="p-sub">'+escapeHtml(p.task)+'</div>'):"")+'</td>'+
+      '<td data-label="'+escapeHtml(t("set.col.company"))+'">'+coBadge(p.company)+'</td>'+
+      '<td data-label="'+escapeHtml(t("set.col.status"))+'">'+empBadge(p.employment||"fulltime")+'</td>'+
+      '<td data-label="'+escapeHtml(t("set.col.seat"))+'">'+placementLabel(p)+'</td>'+
       '<td><div class="p-actions">'+
         '<button class="bp-viewbtn" onclick="openBlueprint('+attr(p.id)+')">'+t("common.view")+'</button>'+
         '<button onclick="editPerson('+attr(p.id)+')">'+t("common.edit")+'</button>'+
