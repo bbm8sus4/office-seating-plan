@@ -1953,21 +1953,28 @@ function loadState(){let raw=null;try{raw=localStorage.getItem(LS_KEY);}catch(e)
 function save(){_invalidateQuota();if(state.meta)state.meta.lastSavedAt=nowISO();try{validateState(state);}catch(vErr){dirty=true;renderSavedLine();toastError("บันทึกไม่ได้ ข้อมูลในหน่วยความจำเสีย: "+vErr.message);try{console.error("[save] validateState failed",vErr);}catch(e){}return false;}if(!canPersist){dirty=true;renderSavedLine();toastError("ไม่บันทึกอัตโนมัติ (private mode / quota เต็ม) — Export เก็บไว้ก่อนปิดหน้าครับ");try{backupToIDB(state);}catch(e){}return false;}let ok=true;try{const prev=localStorage.getItem(LS_KEY);if(prev){try{validateState(JSON.parse(prev));localStorage.setItem(LS_LKG,prev);}catch(e){}}const _blob=JSON.stringify(state);if(_blob.length>4194304)toast(L("ข้อมูลใกล้เต็ม (","Storage nearly full (")+(_blob.length/1048576).toFixed(1)+L(" MB) — ลองลบรูปบางรูป"," MB) — try removing some photos"));localStorage.setItem(LS_KEY,_blob);dirty=false;}catch(e){ok=false;dirty=true;try{console.error("[save] setItem failed",e);}catch(x){}if(e&&(e.name==="QuotaExceededError"||/quota/i.test(String(e.message)))){canPersist=false;renderBanners();toastError("พื้นที่บันทึกเต็ม — Export เก็บไว้แล้วลบรูปเก่าบ้างครับ");}else{toastError("บันทึกไม่สำเร็จ: "+(e&&e.message||e));}}try{backupToIDB(state);}catch(e){}renderSavedLine();try{_scheduleSharedPush();}catch(e){}return ok;}
 /* ============ SHARED REALTIME STATE — everyone with the link edits ONE dataset (KV, last-write-wins) ============ */
 var _sharedVer=0,_sharedPushT=null,_applyingShared=false,_sharedPolling=false,_sharedReady=false,_sharedOn=true;
+var _sharedConflict=null; // {local:bundle, server:bundle, ver:serverVer} — set on 409 so the user chooses instead of silent last-write-wins
 function _gatherShared(){
   const orgs={};
   try{Object.keys(ORG_DEFS).forEach(c=>{try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(raw)orgs[ORG_DEFS[c].key]=JSON.parse(raw);}catch(e){}});}catch(e){}
   let tp=null,vw=null; try{tp=JSON.parse(localStorage.getItem("osp.templates.v1"));}catch(e){} try{vw=JSON.parse(localStorage.getItem("osp.views.v1"));}catch(e){}
   return {state:clone(state),orgs:orgs,orgCompanies:(function(){try{return loadUserOrgCompanies();}catch(e){return [];}})(),templates:tp,views:vw};
 }
-function _scheduleSharedPush(){ if(!_sharedOn||!_sharedReady||_applyingShared)return; if(_sharedPushT)clearTimeout(_sharedPushT); _sharedPushT=setTimeout(_sharedPushNow,700); }
-function _sharedPushNow(){ _sharedPushT=null; if(!_sharedOn)return Promise.resolve(false); let payload; try{payload=_gatherShared();}catch(e){return Promise.resolve(false);}
+function _scheduleSharedPush(){ if(!_sharedOn||!_sharedReady||_applyingShared||_sharedConflict)return; if(_sharedPushT)clearTimeout(_sharedPushT); _sharedPushT=setTimeout(_sharedPushNow,700); }
+function _sharedPushNow(){ _sharedPushT=null; if(!_sharedOn)return Promise.resolve(false); if(_sharedConflict)return Promise.resolve(false); /* conflict pending: only the resolver may write — a raw push here would silently win as "mine" bypassing the banner choice */ let payload; try{payload=_gatherShared();}catch(e){return Promise.resolve(false);}
   return fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({data:payload,baseVer:_sharedVer})})
     .then(r=>r.json().then(j=>({s:r.status,ok:r.ok,j})).catch(()=>({s:r.status,ok:r.ok,j:null})))
     .then(o=>{
-      if(o.s===409){ // someone else wrote since we last synced — don't overwrite them silently
-        if(o.j&&o.j.data){ _sharedVer=(o.j.ver|0); _applyShared(o.j.data); }
-        else { pullShared(false); }
-        try{toast(L("⚠ มีคนอื่นแก้พร้อมกัน — โหลดเวอร์ชันล่าสุดให้แล้ว ตรวจ/แก้ซ้ำถ้าจำเป็น","⚠ Someone else edited at the same time — loaded the latest version, re-check/redo if needed"));}catch(e){}
+      if(o.s===409){ // someone else wrote since we last synced — DON'T overwrite either side silently: let the user choose (rebase)
+        if(o.j&&o.j.data){
+          _sharedVer=(o.j.ver|0);
+          _sharedConflict={local:payload,server:o.j.data,ver:(o.j.ver|0)}; // payload = our un-synced local bundle captured above
+          try{renderBanners();}catch(e){}
+          try{toast(L("⚠ มีคนอื่นแก้พร้อมกัน — เลือกวิธีรวมงานที่แถบด้านบน","⚠ Someone else edited at the same time — pick how to merge in the banner above"));}catch(e){}
+        } else {
+          pullShared(false);
+          try{toast(L("⚠ มีคนอื่นแก้พร้อมกัน — โหลดเวอร์ชันล่าสุดให้แล้ว","⚠ Someone else edited at the same time — loaded the latest version"));}catch(e){}
+        }
         return false;
       }
       if(o.ok&&o.j&&o.j.ver){ _sharedVer=o.j.ver; return true; }
@@ -1976,31 +1983,118 @@ function _sharedPushNow(){ _sharedPushT=null; if(!_sharedOn)return Promise.resol
 function manualSave(){
   const ok=save();
   if(!_sharedOn){ toast(ok?L("บันทึกในเครื่องแล้ว","Saved locally"):L("บันทึกไม่สำเร็จ","Save failed")); return; }
+  if(_sharedConflict){ try{renderBanners();}catch(e){} toast(L("บันทึกในเครื่องแล้ว · มีข้อขัดแย้งกับทีมค้างอยู่ — เลือกวิธีรวมงานที่แถบด้านบนก่อน","Saved locally · a team conflict is pending — resolve it in the banner above first")); return; }
   if(_sharedPushT){clearTimeout(_sharedPushT);_sharedPushT=null;}
   toast(L("กำลังบันทึกขึ้นฐานกลาง…","Saving to shared store…"));
   Promise.resolve(_sharedPushNow()).then(okp=>{ toast(okp?L("บันทึก + sync ทุกคนแล้ว ✓","Saved + synced to everyone ✓"):L("บันทึกในเครื่องแล้ว · sync ไม่สำเร็จ (เช็คเน็ต)","Saved locally · sync failed (check network)")); });
 }
+// Atomic adopt of a shared bundle: validate the WHOLE bundle + serialize every key up-front (staging),
+// then commit all localStorage.setItem writes in one tight block. If the incoming state is invalid we
+// abort the entire apply — never adopt a half-applied bundle (state new / orgs stale, or vice-versa).
 function _applyShared(data){
-  if(!data||typeof data!=="object")return;
+  if(!data||typeof data!=="object")return false;
   if(_sharedPushT){clearTimeout(_sharedPushT);_sharedPushT=null;} // stale local push must not re-fire after we adopt server state
   _applyingShared=true;
-  let _restored=false;
+  let _restored=false, _committed=false;
   try{
     const _lp={}; try{(state.people||[]).forEach(p=>{if(p.photo)_lp[p.id]=p.photo;});}catch(e){}
-    if(data.state&&typeof data.state==="object"){ try{const cand=migrate(clone(data.state));validateState(cand);repairOrphans(cand);
-      try{(cand.people||[]).forEach(p=>{if(!p.photo&&_lp[p.id]){p.photo=_lp[p.id];_restored=true;}});}catch(e){} // never drop a photo already uploaded on this device
-      state=cand;try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}}catch(vE){} }
-    if(data.orgs&&typeof data.orgs==="object"){ Object.keys(data.orgs).forEach(k=>{try{localStorage.setItem(k,JSON.stringify(data.orgs[k]));}catch(e){}}); }
-    if(Array.isArray(data.orgCompanies)){ try{saveUserOrgCompanies(data.orgCompanies);rebuildOrgDefs();}catch(e){} }
-    if(data.templates&&typeof data.templates==="object"){ try{localStorage.setItem("osp.templates.v1",JSON.stringify(data.templates));tpls=data.templates;}catch(e){} }
+    // ---- stage 1: build + validate everything BEFORE writing anything ----
+    let cand=null, candBlob=null;
+    if(data.state&&typeof data.state==="object"){
+      try{
+        cand=migrate(clone(data.state));validateState(cand);repairOrphans(cand);
+        try{(cand.people||[]).forEach(p=>{if(!p.photo&&_lp[p.id]){p.photo=_lp[p.id];_restored=true;}});}catch(e){} // never drop a photo already uploaded on this device
+        candBlob=JSON.stringify(cand);
+      }catch(vE){ cand=null;candBlob=null;try{console.error("[_applyShared] incoming state invalid — aborting apply",vE);}catch(e){} }
+    }
+    // if the payload carried a state but it failed validation, adopt NOTHING (avoid mixed old/new stores)
+    if(data.state&&typeof data.state==="object"&&!cand){ return false; }
+    const orgWrites=[];
+    if(data.orgs&&typeof data.orgs==="object"){ Object.keys(data.orgs).forEach(k=>{try{orgWrites.push([k,JSON.stringify(data.orgs[k])]);}catch(e){}}); }
+    let tplBlob=null;
+    if(data.templates&&typeof data.templates==="object"){ try{tplBlob=JSON.stringify(data.templates);}catch(e){} }
+    let ocBlob=null;
+    if(Array.isArray(data.orgCompanies)){ try{ocBlob=JSON.stringify(data.orgCompanies);}catch(e){} }
+    // ---- stage 2: commit as one batch, with rollback on ANY write failure ----
+    // Build the full write list up-front. If any localStorage.setItem throws (quota/private mode) we restore
+    // every key we already wrote to its previous value — never leave a half-applied bundle (state new / orgs stale).
+    const writes=[]; // [key, newValue]
+    if(candBlob)writes.push([LS_KEY,candBlob]);
+    orgWrites.forEach(w=>writes.push(w));
+    if(tplBlob!=null)writes.push(["osp.templates.v1",tplBlob]);
+    if(ocBlob!=null)writes.push([USER_ORG_KEY,ocBlob]); // org-companies list joins the atomic batch (was a separate untracked write before)
+    const done=[]; // [key, prevValueOrNull] for rollback
+    let writeOk=true, failErr=null;
+    for(const [k,v] of writes){
+      let prev=null; try{prev=localStorage.getItem(k);}catch(e){}
+      try{ localStorage.setItem(k,v); done.push([k,prev]); }
+      catch(e){ writeOk=false; failErr=e; break; }
+    }
+    if(!writeOk){
+      // roll back everything we managed to write this batch
+      for(const [k,prev] of done){ try{ if(prev===null)localStorage.removeItem(k); else localStorage.setItem(k,prev); }catch(e){} }
+      try{console.error("[_applyShared] commit failed — rolled back, adopted nothing",failErr);}catch(e){}
+      try{toastError(L("รับข้อมูลจากทีมไม่สำเร็จ (พื้นที่บันทึกเต็ม/โหมดส่วนตัว) — คงงานเดิมไว้","Couldn’t adopt team’s data (storage full/private mode) — kept yours"));}catch(e){}
+      return false; // state NOT reassigned; in-memory data untouched
+    }
+    // all localStorage writes succeeded → now safe to adopt in-memory
+    if(candBlob){ state=cand; }
+    if(tplBlob!=null){ tpls=data.templates; }
+    if(ocBlob!=null){ try{rebuildOrgDefs();}catch(e){} } // key already written atomically above — just refresh derived defs
+    _committed=true;
     if(!ORG_DEFS[orgCompany])orgCompany="thunder";
     undoStack=[];redoStack=[];orgUndoStack=[];orgRedoStack=[];
     try{orgState=loadOrgState(orgCompany);}catch(e){}
     try{render();}catch(e){} try{renderOrg();}catch(e){} try{updateOrgCompanyUI();}catch(e){}
-  }finally{ _applyingShared=false; if(_restored)setTimeout(_sharedPushNow,900); }
+  }finally{ _applyingShared=false; if(_committed&&_restored)setTimeout(_sharedPushNow,900); } // only re-push restored photos if we actually adopted — a failed/aborted apply must not push a stale local bundle over the team
+  return _committed;
+}
+// ---- conflict resolution (409): the user picks instead of last-write-wins clobbering a teammate ----
+// push an explicit bundle at a chosen baseVer (used by "keep mine" to re-assert local over the new server ver)
+// returns {ok, status, j} so the caller can react to a *fresh* 409 (someone edited again) vs a plain failure
+function _pushBundle(bundle,baseVer){
+  if(!_sharedOn)return Promise.resolve({ok:false,status:0,j:null});
+  return fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({data:bundle,baseVer:baseVer})})
+    .then(r=>r.json().then(j=>({s:r.status,ok:r.ok,j})).catch(()=>({s:r.status,ok:r.ok,j:null})))
+    .then(o=>{ if(o.ok&&o.j&&o.j.ver){ _sharedVer=o.j.ver; } return {ok:!!(o.ok&&o.j&&o.j.ver),status:o.s,j:o.j}; })
+    .catch(()=>({ok:false,status:0,j:null}));
+}
+function _resolveConflictKeepMine(){
+  const c=_sharedConflict; if(!c)return;
+  toast(L("กำลังยืนยันงานของฉันขึ้นฐานกลาง…","Re-asserting my version…"));
+  _pushBundle(c.local,c.ver).then(res=>{
+    if(res.ok){ _sharedConflict=null; try{renderBanners();}catch(e){} toast(L("ใช้งานของฉันแล้ว · sync ทุกคน ✓","Kept mine · synced ✓")); return; }
+    if(res.status===409&&res.j&&res.j.data){ // someone edited AGAIN while we were re-asserting — refresh the conflict, keep the banner
+      _sharedVer=(res.j.ver|0); _sharedConflict={local:c.local,server:res.j.data,ver:(res.j.ver|0)};
+      try{renderBanners();}catch(e){} toast(L("มีคนแก้อีกครั้งระหว่างยืนยัน — ตรวจแล้วเลือกใหม่","Someone edited again while re-asserting — review & choose again")); return;
+    }
+    // plain failure (network/other): DON'T clear — leave the banner so the user can retry
+    try{renderBanners();}catch(e){} toast(L("ยืนยันไม่สำเร็จ (เช็คเน็ต) — กด 'ใช้ของฉัน' อีกครั้ง","Re-assert failed (check network) — press ‘Use mine’ again"));
+  });
+}
+function _resolveConflictUseTheirs(){
+  const c=_sharedConflict; if(!c)return;
+  const applied=_applyShared(c.server); // atomic; validates server bundle
+  _sharedConflict=null; try{renderBanners();}catch(e){}
+  toast(applied?L("ใช้งานของทีมแล้ว","Using team’s version"):L("งานของทีมใช้ไม่ได้ (ข้อมูลไม่ผ่านตรวจ) — คงงานเดิมไว้","Team’s version was invalid — kept yours"));
+}
+function _showConflictDiff(){
+  const c=_sharedConflict; if(!c)return;
+  const mp=(c.local&&c.local.state&&c.local.state.people)||[], tp=(c.server&&c.server.state&&c.server.state.people)||[];
+  const mById={},tById={}; mp.forEach(p=>mById[p.id]=p); tp.forEach(p=>tById[p.id]=p);
+  const onlyMine=mp.filter(p=>!tById[p.id]).map(p=>p.nickname||p.id);
+  const onlyTheirs=tp.filter(p=>!mById[p.id]).map(p=>p.nickname||p.id);
+  const seatDiff=mp.filter(p=>tById[p.id]&&(tById[p.id].seat||null)!==(p.seat||null)).map(p=>p.nickname||p.id);
+  const lines=[
+    L("เปรียบเทียบงาน (ของฉัน ↔ ทีม):","Compare (mine ↔ team):"),
+    L("• คนที่มีเฉพาะของฉัน: ","• Only in mine: ")+(onlyMine.length?onlyMine.join(", "):"—"),
+    L("• คนที่มีเฉพาะของทีม: ","• Only in team’s: ")+(onlyTheirs.length?onlyTheirs.join(", "):"—"),
+    L("• ที่นั่งต่างกัน: ","• Different seats: ")+(seatDiff.length?seatDiff.join(", "):"—")
+  ];
+  alert(lines.join("\n"));
 }
 function pullShared(showToast){
-  if(!_sharedOn)return Promise.resolve();
+  if(!_sharedOn||_sharedConflict)return Promise.resolve(); // a conflict is awaiting the user's choice — don't auto-adopt server behind their back
   return fetch("/api/state",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{
     if(!j)return;
     const valid = j.data&&j.data.state&&Array.isArray(j.data.state.people)&&j.data.state.people.length>0;
@@ -2752,6 +2846,7 @@ function pjDrop(e,targetId){
 }
 function renderBanners(){
   const b=document.getElementById("banners"); let html="";
+  if(_sharedConflict){const c=_sharedConflict;let mine=0,theirs=0;try{mine=((c.local&&c.local.state&&c.local.state.people)||[]).length;}catch(e){}try{theirs=((c.server&&c.server.state&&c.server.state.people)||[]).length;}catch(e){}html+='<div class="banner alert"><span class="grow">⚠ '+L("มีคนในทีมแก้พร้อมกัน","A teammate edited at the same time")+' — '+L("งานของฉัน","mine")+' '+mine+L(" คน · ทีม"," ppl · team")+' '+theirs+L(" คน. เลือกวิธีรวมงาน:"," ppl. Pick how to merge:")+'</span><button onclick="_resolveConflictKeepMine()">'+L("ใช้ของฉัน","Use mine")+'</button><button onclick="_resolveConflictUseTheirs()">'+L("ใช้ของทีม","Use team’s")+'</button><button onclick="_showConflictDiff()">'+L("ดู diff","View diff")+'</button></div>';}
   if(corruptionInfo){html+='<div class="banner alert"><span class="grow">ข้อมูลเสียหายตอนโหลด ('+escapeHtml(corruptionInfo.error)+') — ลองกู้สำเนา</span><button onclick="restoreLKG()">Restore LKG</button><button onclick="restoreFromIDB()">Restore backup</button><button onclick="downloadCorrupted()">Download</button><button onclick="dismissCorruption();render()">ปิด</button></div>';}
   if(!canPersist){html+='<div class="banner warn"><span class="grow">ไม่บันทึกอัตโนมัติ (private / quota) — อย่าลืม Export เก็บสำเนา</span></div>';}
   const pct=_quotaPct();
