@@ -20,9 +20,20 @@ Single-file HTML app for managing office seating, org charts, product/lane board
 
 ## Repo layout
 - `dist/index.html` — the app
+- `functions/_middleware.js` — Cloudflare Pages Function that gates the whole site (Basic Auth) — reads the password from an env var, no secret in code
 - `versions/` — version checkpoints (`seatArh_v.1.0.x`)
 
-> The Cloudflare Worker (`_worker.js`) and `wrangler.toml` are intentionally **not** included — they hold the deployment gate password.
+## Deployment / access gate
+
+The site is gated by `functions/_middleware.js` using HTTP Basic Auth. The password is **not** in the repo — it is read from the `SITE_PASSWORD` environment variable so the code can auto-deploy safely from GitHub.
+
+Founder setup (Cloudflare Pages dashboard, one-time):
+1. **Settings → Environment variables** → add `SITE_PASSWORD` = your gate password (Production + Preview).
+2. **Settings → Functions → KV namespace bindings** → bind your existing KV namespace to the name `SEATMAP_KV` (used by `/api/state` shared sync).
+
+Behavior: any username is accepted; only the password is checked (constant-time). If `SITE_PASSWORD` is unset the site **fails closed** (returns 401 to everyone). See `.env.example` for the variable names.
+
+> The old Cloudflare Worker (`_worker.js`) and `wrangler.toml` remain gitignored — they held a hard-coded password and are superseded by the env-based middleware above.
 
 ## Version
 APP_VERSION `v3.9.0` · checkpoint `seatArh_v.1.0.2` (full TH/EN i18n)
