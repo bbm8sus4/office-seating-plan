@@ -1935,11 +1935,59 @@ let canPersist=true, corruptionInfo=null, dirty=false;
 (function(){try{localStorage.setItem("__t","1");localStorage.removeItem("__t");canPersist=true;}catch(e){canPersist=false;}})();
 function seatExists(seatId){if(!seatId)return false;const i=seatId.lastIndexOf("-");const rid=seatId.slice(0,i),idx=parseInt(seatId.slice(i+1),10);const room=state.rooms.find(r=>r.id===rid);if(!room)return false;return idx>=0&&idx<seatCount(room);}
 function validateState(st){if(!st||typeof st!=="object")throw new Error("state not object");if(!Array.isArray(st.rooms)||!Array.isArray(st.people))throw new Error("rooms/people missing");const ids=new Set();for(const p of st.people){if(!p.id||ids.has(p.id))throw new Error("dup person id "+p.id);ids.add(p.id);if(p.products!==undefined&&!Array.isArray(p.products))throw new Error("bad person products "+p.id);}const rids=new Set();for(const r of st.rooms){if(!r.id||rids.has(r.id))throw new Error("dup room id "+r.id);rids.add(r.id);if(!(r.layout==="island"||(Array.isArray(r.layout)&&r.layout.length&&r.layout.every(n=>Number.isFinite(n)&&n>0))))throw new Error("bad room layout "+r.id);}if(!st.holds||typeof st.holds!=="object")st.holds={};if(st.products!==undefined){if(!Array.isArray(st.products))throw new Error("products not array");for(const pr of st.products){if(!pr||!pr.id)throw new Error("bad product");if(pr.lanes!==undefined&&!Array.isArray(pr.lanes))throw new Error("bad product lanes "+pr.id);}}return st;}
+// STRICT validation — used ONLY on the import path (never on live save/load, so existing prod data can't be
+// bricked). Runs the base structural checks then rejects genuinely-broken data an imported file might carry.
+// Assumes normalizeState() has NOT been run yet, so it can catch bad enums/refs the user's file actually has.
+function validateStateStrict(st){
+  validateState(st); // base: shape, dup ids, room layout, product/lane array shape
+  // seatOk: valid format AND the index is within the room's real capacity (so an over-capacity seat/hold is
+  // rejected at import, not silently dropped later by repairOrphans).
+  const seatOk=(sid)=>{ if(typeof sid!=="string"||!sid)return false; const i=sid.lastIndexOf("-"); if(i<=0)return false; const rid=sid.slice(0,i),idx=sid.slice(i+1); if(!/^\d+$/.test(idx))return false; const room=st.rooms.find(r=>r.id===rid); if(!room)return false; const n=parseInt(idx,10); return n>=0&&n<seatCount(room); };
+  const prodIds=new Set((st.products||[]).map(pr=>pr.id));
+  const laneIdsByProd={}; (st.products||[]).forEach(pr=>{laneIdsByProd[pr.id]=new Set((pr.lanes||[]).map(l=>l&&l.id));});
+  for(const p of st.people){
+    if(p.seat!=null&&!seatOk(p.seat))throw new Error("bad seat format/ref "+p.id+": "+p.seat);
+    if(p.status!=null&&!STATUS_ENUM.includes(p.status))throw new Error("bad status enum "+p.id+": "+p.status);
+    if(p.employment!=null&&!EMPLOYMENT_ENUM.includes(p.employment))throw new Error("bad employment enum "+p.id+": "+p.employment);
+    // salary is stored as a digit STRING by the form (_readPersonForm), so accept number OR numeric string, then range-check
+    if(p.salary!=null&&p.salary!==""){ const sn=(typeof p.salary==="number")?p.salary:((/^\d+$/.test(String(p.salary)))?Number(p.salary):NaN); if(!Number.isFinite(sn)||sn<0||sn>1e9)throw new Error("bad salary "+p.id+": "+p.salary); }
+    [["startDate",p.startDate],["birthdate",p.birthdate],["probationEnd",p.probationEnd]].forEach(([k,v])=>{ if(v!=null){ if(typeof v!=="string"||!/^\d{4}-\d{2}-\d{2}/.test(v)||isNaN(new Date(v).getTime()))throw new Error("bad date "+k+" "+p.id+": "+v); } });
+    if(p.products!=null){ if(!Array.isArray(p.products))throw new Error("bad products "+p.id); for(const a of p.products){ if(!a||!a.product)throw new Error("bad product assignment "+p.id); if(!prodIds.has(a.product))throw new Error("product ref missing "+p.id+": "+a.product); if(a.lane!=null&&!(laneIdsByProd[a.product]&&laneIdsByProd[a.product].has(a.lane)))throw new Error("lane ref missing "+p.id+": "+a.lane); } }
+  }
+  if(st.holds&&typeof st.holds==="object"){ for(const sid of Object.keys(st.holds)){ if(!seatOk(sid))throw new Error("bad hold seat "+sid); const h=st.holds[sid]; if(h==null||typeof h!=="object")throw new Error("bad hold shape "+sid); } }
+  return st;
+}
 function repairOrphans(st){let fixed=0;const seen={};for(const p of st.people){if(p.seat){const i=p.seat.lastIndexOf("-");const rid=p.seat.slice(0,i),idx=parseInt(p.seat.slice(i+1),10);const room=st.rooms.find(r=>r.id===rid);if(!room||!(idx>=0&&idx<seatCount(room))){p.seat=null;fixed++;continue;}if(seen[p.seat]){p.seat=null;fixed++;continue;}seen[p.seat]=p.id;}}const occ=new Set();for(const p of st.people)if(p.seat)occ.add(p.seat);for(const sid of Object.keys(st.holds||{})){const i=sid.lastIndexOf("-");const rid=sid.slice(0,i),idx=parseInt(sid.slice(i+1),10);const room=st.rooms.find(r=>r.id===rid);if(!room||!(idx>=0&&idx<seatCount(room))){delete st.holds[sid];fixed++;continue;}if(occ.has(sid)){delete st.holds[sid];fixed++;}}return fixed;}
 const NAME_FIX_MAP={poomnoi:"ธนิสร มังกร",nong:"อรัญใจ งามคูณ"};
-function migrate(st){if(!st.version||st.version<2){st.version=2;st.holds=st.holds||{};}st.meta=st.meta||freshMeta();st.holds=st.holds||{};if(!st.meta.legacyRoomsPruned){const before=(st.rooms||[]).length;st.rooms=(st.rooms||[]).filter(r=>r.id!=="r208"&&r.id!=="r205");st.meta.legacyRoomsPruned=true;const removed=before-st.rooms.length;if(removed>0){try{setTimeout(()=>toast(L("ลบห้องเลิกใช้ (r208/r205) ","Removed retired rooms (r208/r205) ")+removed+L(" ห้อง จาก legacy import"," rooms from legacy import")),400);}catch(e){}}}(st.people||[]).forEach(p=>{if(!["active","new-hire","remote","hybrid","owner"].includes(p.status))p.status="active";if(p.startDate===undefined)p.startDate=null;if(p.team===undefined)p.team=null;if(p.photo===undefined)p.photo=null;else if(p.photo!=null&&!/^data:image\//.test(p.photo))p.photo=null;if(p.employment===undefined)p.employment="fulltime";if(!["fulltime","parttime","freelance","intern"].includes(p.employment))p.employment="fulltime";if(p.task===undefined)p.task=null;["phone","email","lineId","birthdate","address","emgName","emgRelation","emgPhone","bloodType","allergies","medical","salary","probationEnd"].forEach(k=>{if(p[k]===undefined)p[k]=null;});if(!Array.isArray(p.products)){p.products=p.product?[{product:p.product,lane:p.lane||null}]:[];}delete p.product;delete p.lane;});if(!st.meta.nameFix250){(st.people||[]).forEach(p=>{if(p.id&&NAME_FIX_MAP[p.id]){p.fullName=NAME_FIX_MAP[p.id];}});st.meta.nameFix250=true;}if(!Array.isArray(st.products))st.products=clone(DEFAULT_PRODUCTS);(st.products||[]).forEach(pr=>{if(pr&&!Array.isArray(pr.lanes))pr.lanes=[];});
-// no lanes = no members: people always live in a lane; project without lanes holds nobody
-let _kicked=0;(st.people||[]).forEach(p=>{if(!Array.isArray(p.products))p.products=[];const keep=[];p.products.forEach(a=>{const pr=(st.products||[]).find(x=>x.id===a.product);if(!pr||!pr.lanes.length){_kicked++;return;}if(!a.lane||!pr.lanes.some(l=>l.id===a.lane))a.lane=pr.lanes[0].id;if(keep.some(k=>k.product===a.product))return;keep.push(a);});p.products=keep;});if(_kicked>0){try{setTimeout(()=>toast(L("ย้ายงาน ","Moved task ")+_kicked+L(" รายการออกจากโปรดักส์ที่ไม่มีเลน"," items from products without lanes")),500);}catch(e){}}
+// enum whitelists — single source of truth shared by normalize (coerce) + strict validate (reject)
+const STATUS_ENUM=["active","new-hire","remote","hybrid","owner"];
+const EMPLOYMENT_ENUM=["fulltime","parttime","freelance","intern"];
+const PERSON_NULLABLE=["phone","email","lineId","birthdate","address","emgName","emgRelation","emgPhone","bloodType","allergies","medical","salary","probationEnd"];
+// normalizeState: idempotent shape/enum/default coercion + product-lane reconciliation. Safe to run on the LIVE
+// path (never throws — it fixes rather than rejects). Extracted from migrate() so import can normalize too.
+// Returns {kicked} count of task rows dropped (product without lanes) for optional user feedback.
+function normalizeState(st){
+  st.holds=st.holds||{};
+  (st.people||[]).forEach(p=>{
+    if(!STATUS_ENUM.includes(p.status))p.status="active";
+    if(p.startDate===undefined)p.startDate=null;
+    if(p.team===undefined)p.team=null;
+    if(p.photo===undefined)p.photo=null; else if(p.photo!=null&&!/^data:image\//.test(p.photo))p.photo=null;
+    if(p.employment===undefined)p.employment="fulltime";
+    if(!EMPLOYMENT_ENUM.includes(p.employment))p.employment="fulltime";
+    if(p.task===undefined)p.task=null;
+    PERSON_NULLABLE.forEach(k=>{if(p[k]===undefined)p[k]=null;});
+    if(!Array.isArray(p.products)){p.products=p.product?[{product:p.product,lane:p.lane||null}]:[];}
+    delete p.product;delete p.lane;
+  });
+  if(!Array.isArray(st.products))st.products=clone(DEFAULT_PRODUCTS);
+  (st.products||[]).forEach(pr=>{if(pr&&!Array.isArray(pr.lanes))pr.lanes=[];});
+  // no lanes = no members: people always live in a lane; project without lanes holds nobody
+  let _kicked=0;
+  (st.people||[]).forEach(p=>{if(!Array.isArray(p.products))p.products=[];const keep=[];p.products.forEach(a=>{const pr=(st.products||[]).find(x=>x.id===a.product);if(!pr||!pr.lanes.length){_kicked++;return;}if(!a.lane||!pr.lanes.some(l=>l.id===a.lane))a.lane=pr.lanes[0].id;if(keep.some(k=>k.product===a.product))return;keep.push(a);});p.products=keep;});
+  return {kicked:_kicked};
+}
+function migrate(st){if(!st.version||st.version<2){st.version=2;st.holds=st.holds||{};}st.meta=st.meta||freshMeta();st.holds=st.holds||{};if(!st.meta.legacyRoomsPruned){const before=(st.rooms||[]).length;st.rooms=(st.rooms||[]).filter(r=>r.id!=="r208"&&r.id!=="r205");st.meta.legacyRoomsPruned=true;const removed=before-st.rooms.length;if(removed>0){try{setTimeout(()=>toast(L("ลบห้องเลิกใช้ (r208/r205) ","Removed retired rooms (r208/r205) ")+removed+L(" ห้อง จาก legacy import"," rooms from legacy import")),400);}catch(e){}}}if(!st.meta.nameFix250){(st.people||[]).forEach(p=>{if(p.id&&NAME_FIX_MAP[p.id]){p.fullName=NAME_FIX_MAP[p.id];}});st.meta.nameFix250=true;}const _nz=normalizeState(st);const _kicked=_nz.kicked;if(_kicked>0){try{setTimeout(()=>toast(L("ย้ายงาน ","Moved task ")+_kicked+L(" รายการออกจากโปรดักส์ที่ไม่มีเลน"," items from products without lanes")),500);}catch(e){}}
 if(!st.meta.addedQaVibe){const _have=new Set((st.people||[]).map(p=>p.id));if(!_have.has("nh-qa"))st.people.push(P("nh-qa","QA","","QA Engineer (incoming)","Other",null,"Dev","new-hire"));if(!_have.has("nh-vibe"))st.people.push(P("nh-vibe","VIBE","","Vibe Coder / Dev (incoming)","Other",null,"Dev","new-hire"));st.meta.addedQaVibe=true;}applyBuildingLayout(st);const wasV=st.meta.appVersion||"";st.meta.appVersionPrev=wasV;st.meta.appVersion=APP_VERSION;return st;}
 function applyBuildingLayout(st){
   if(st.meta&&st.meta.buildingMapped)return;
@@ -3411,15 +3459,30 @@ function importAll(ev){
   r.readAsText(f);ev.target.value="";
 }
 function _importDiff(parsed){const havePeople=new Set(state.people.map(p=>p.id)),haveRooms=new Set(state.rooms.map(r=>r.id)),haveProds=new Set((state.products||[]).map(pr=>pr.id));const addP=(parsed.people||[]).filter(p=>!havePeople.has(p.id)).length;const addR=(parsed.rooms||[]).filter(r=>!haveRooms.has(r.id)).length;const addPr=(parsed.products||[]).filter(pr=>pr&&pr.id&&!haveProds.has(pr.id)).length;const conflictP=(parsed.people||[]).filter(p=>havePeople.has(p.id)).length;const conflictR=(parsed.rooms||[]).filter(r=>haveRooms.has(r.id)).length;const totalHolds=Object.keys(parsed.holds||{}).length;return {addP,addR,addPr,conflictP,conflictR,totalHolds,parsedTotalPeople:(parsed.people||[]).length,parsedTotalRooms:(parsed.rooms||[]).length};}
-function importJSON(event){if(isLocked){toast(T_LOCKED_IMPORT);event.target.value="";return;}const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{try{let parsed=JSON.parse(e.target.result);Object.keys(parsed).forEach(k=>{if(k.indexOf("__")===0)delete parsed[k];});parsed=migrate(parsed);validateState(parsed);const diff=_importDiff(parsed);const summary="ไฟล์ที่ import มี:\n"+
+// Reconcile a duplicate-id person on MERGE import: incoming non-null/non-empty fields win (so newer data from
+// the file updates role/photo/status/seat/etc.), but fields the file DOESN'T carry keep the existing value —
+// an import can never blank out data it simply omitted. Never touches the id.
+function _reconcilePerson(existing,incoming){
+  const out=clone(existing);
+  Object.keys(incoming).forEach(k=>{
+    if(k==="id")return;
+    const v=incoming[k];
+    if(v===undefined||v===null)return;               // file omits this field → keep existing
+    if(typeof v==="string"&&v.trim()==="")return;      // empty string → treat as "not provided", keep existing
+    if(k==="products"){ if(Array.isArray(v)&&v.length)out.products=clone(v); return; } // only replace task list if the file actually has one
+    out[k]=v;
+  });
+  return out;
+}
+function importJSON(event){if(isLocked){toast(T_LOCKED_IMPORT);event.target.value="";return;}const file=event.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=e=>{try{let parsed=JSON.parse(e.target.result);Object.keys(parsed).forEach(k=>{if(k.indexOf("__")===0)delete parsed[k];});try{validateStateStrict(parsed);}catch(sErr){alert(L("ไฟล์ import มีข้อมูลผิดรูปแบบ ไม่นำเข้าเพื่อกันข้อมูลเสีย:\n","Import file has malformed data — not importing (to avoid corruption):\n")+(sErr&&sErr.message||sErr));event.target.value="";return;}parsed=migrate(parsed);validateState(parsed);const diff=_importDiff(parsed);const summary="ไฟล์ที่ import มี:\n"+
 "  · คน "+diff.parsedTotalPeople+" คน (เพิ่มใหม่ "+diff.addP+" · id ซ้ำ "+diff.conflictP+")\n"+
 "  · ห้อง "+diff.parsedTotalRooms+" ห้อง (เพิ่มใหม่ "+diff.addR+" · id ซ้ำ "+diff.conflictR+")\n"+
 "  · โปรดักส์เพิ่ม "+diff.addPr+" ตัว\n"+
 "  · จอง "+diff.totalHolds+" ที่\n\n"+
 "เลือกวิธี:\n"+
 "  OK = REPLACE (แทนที่ทั้งหมด " +diff.parsedTotalPeople+ " คน / "+diff.parsedTotalRooms+" ห้อง · ของเดิมหาย)\n"+
-"  Cancel = MERGE (เก็บของเดิม + เพิ่มเฉพาะ id ใหม่: "+diff.addP+" คน + "+diff.addR+" ห้อง + "+diff.addPr+" โปรดักส์)";
-const mode=confirm(summary)?"replace":"merge";const snap=snapshot();pushUndo();if(mode==="replace"){repairOrphans(parsed);state=parsed;}else{const haveP=new Set(state.people.map(p=>p.id));parsed.people.forEach(p=>{if(!haveP.has(p.id))state.people.push(p);});const haveR=new Set(state.rooms.map(r=>r.id));parsed.rooms.forEach(r=>{if(!haveR.has(r.id))state.rooms.push(r);});Object.keys(parsed.holds||{}).forEach(sid=>{if(!state.holds[sid])state.holds[sid]=parsed.holds[sid];});const haveProd=new Set((state.products||[]).map(pr=>pr.id));(parsed.products||[]).forEach(pr=>{if(!pr||!pr.id)return;if(!haveProd.has(pr.id)){state.products.push(pr);}else{const exist=state.products.find(x=>x.id===pr.id);if(exist){if(!Array.isArray(exist.lanes))exist.lanes=[];const haveLn=new Set(exist.lanes.map(l=>l.id));(pr.lanes||[]).forEach(ln=>{if(ln&&ln.id&&!haveLn.has(ln.id))exist.lanes.push(ln);});}}});repairOrphans(state);}const ok=save();if(!ok){try{state=JSON.parse(snap);}catch(e){}render();return;}render();toast("Import ("+mode+L(") สำเร็จ · ",") done · ")+(mode==="replace"?L("แทนที่","Replace"):L("เพิ่ม","Add")));}catch(err){alert(L("Import ไม่สำเร็จ: ","Import failed: ")+(err&&err.message||err));}};reader.readAsText(file);event.target.value="";}
+"  Cancel = MERGE (เพิ่ม id ใหม่: "+diff.addP+" คน + "+diff.addR+" ห้อง + "+diff.addPr+" โปรดักส์ · id ซ้ำ "+diff.conflictP+" คน = อัปเดตข้อมูลจากไฟล์ ทับเฉพาะช่องที่ไฟล์มีค่า)";
+const mode=confirm(summary)?"replace":"merge";const snap=snapshot();pushUndo();if(mode==="replace"){repairOrphans(parsed);state=parsed;}else{const byId=new Map(state.people.map(p=>[p.id,p]));parsed.people.forEach(p=>{const exist=byId.get(p.id);if(!exist){state.people.push(p);byId.set(p.id,p);}else{const merged=_reconcilePerson(exist,p);const idx=state.people.indexOf(exist);if(idx>=0)state.people[idx]=merged;byId.set(p.id,merged);}});const haveR=new Set(state.rooms.map(r=>r.id));parsed.rooms.forEach(r=>{if(!haveR.has(r.id))state.rooms.push(r);});Object.keys(parsed.holds||{}).forEach(sid=>{if(!state.holds[sid])state.holds[sid]=parsed.holds[sid];});const haveProd=new Set((state.products||[]).map(pr=>pr.id));(parsed.products||[]).forEach(pr=>{if(!pr||!pr.id)return;if(!haveProd.has(pr.id)){state.products.push(pr);}else{const exist=state.products.find(x=>x.id===pr.id);if(exist){if(!Array.isArray(exist.lanes))exist.lanes=[];const haveLn=new Set(exist.lanes.map(l=>l.id));(pr.lanes||[]).forEach(ln=>{if(ln&&ln.id&&!haveLn.has(ln.id))exist.lanes.push(ln);});}}});repairOrphans(state);}const ok=save();if(!ok){try{state=JSON.parse(snap);}catch(e){}render();return;}render();toast("Import ("+mode+L(") สำเร็จ · ",") done · ")+(mode==="replace"?L("แทนที่","Replace"):L("เพิ่ม","Add")));}catch(err){alert(L("Import ไม่สำเร็จ: ","Import failed: ")+(err&&err.message||err));}};reader.readAsText(file);event.target.value="";}
 
 function restoreLKG(){
   if(isLocked){toast(T_LOCKED_RESTORE);return;}
