@@ -246,6 +246,46 @@ body.view-dashboard .topbar-search,body.view-settings .topbar-search,body.view-o
 .wl-dash{color:var(--faint);}
 .wl-bar{width:100%;min-width:120px;}
 .wl-empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:13.5px;background:var(--card);border:1px solid var(--border);border-radius:12px;}
+.dash-hero-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+/* ---- assignment matrix modal ---- */
+.am-card{max-width:min(1040px,96vw);width:100%;display:flex;flex-direction:column;max-height:92vh;}
+.am-head{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.am-head h2{margin:0;}
+.am-x{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--muted);cursor:pointer;font-size:14px;line-height:1;flex:0 0 auto;}
+.am-x:hover{background:color-mix(in oklab,var(--card),var(--ink) 8%);}
+.am-sub{font-size:12px;color:var(--muted);margin:4px 0 12px;}
+.am-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;}
+.am-toolbar input,.am-toolbar select{padding:7px 11px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--ink);font-size:12.5px;}
+.am-toolbar input{flex:1 1 200px;min-width:150px;}
+.am-toolbar input:focus,.am-toolbar select:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px rgba(124,58,237,.15);}
+.am-tablewrap{overflow:auto;border:1px solid var(--border);border-radius:12px;flex:1 1 auto;min-height:0;}
+.am-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;}
+.am-tbl th,.am-tbl td{padding:0 10px;height:44px;border-bottom:1px solid var(--border);vertical-align:middle;text-align:center;white-space:nowrap;}
+.am-tbl thead th{position:sticky;top:0;background:var(--card);z-index:2;font-weight:800;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);box-shadow:inset 0 -1px 0 var(--border);}
+.am-tbl th.am-pcol,.am-tbl td.am-pcol{position:sticky;left:0;background:var(--card);z-index:1;text-align:left;min-width:172px;box-shadow:inset -1px 0 0 var(--border);}
+.am-tbl thead th.am-pcol{z-index:3;}
+.am-tbl tbody tr:nth-child(even) td{background:color-mix(in oklab,var(--card),var(--ink) 2.6%);}
+.am-tbl tbody tr:nth-child(even) td.am-pcol{background:color-mix(in oklab,var(--card),var(--ink) 2.6%);}
+.am-tbl tbody tr:hover td{background:color-mix(in oklab,var(--card),var(--accent) 8%);}
+.am-tbl tbody tr:hover td.am-pcol{background:color-mix(in oklab,var(--card),var(--accent) 8%);}
+.am-prod{max-width:120px;white-space:normal;line-height:1.2;}
+.am-person{display:flex;align-items:center;gap:9px;min-width:0;}
+.am-person .pc-av{width:30px;height:30px;border-radius:50%;flex:0 0 30px;display:inline-flex;align-items:center;justify-content:center;color:var(--on-accent);font-weight:800;font-size:12px;background-size:cover;background-position:center;}
+.am-pmeta{min-width:0;text-align:left;}
+.am-nm{font-weight:700;color:var(--ink);font-size:12.5px;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.am-sub2{}
+.am-person .am-sub{font-size:10.5px;color:var(--muted);margin:1px 0 0;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;}
+.am-check{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;position:relative;}
+.am-check input{position:absolute;opacity:0;width:20px;height:20px;margin:0;cursor:pointer;}
+.am-box{width:20px;height:20px;border-radius:6px;border:2px solid var(--line-strong);background:var(--card);display:inline-block;transition:.12s;position:relative;}
+.am-check input:checked+.am-box{background:var(--accent);border-color:var(--accent);}
+.am-check input:checked+.am-box::after{content:"";position:absolute;left:5px;top:1px;width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+.am-check input:focus-visible+.am-box{box-shadow:0 0 0 3px rgba(124,58,237,.3);}
+.am-cnt{width:1%;}
+.am-cbadge{background:var(--surface-2);color:var(--muted);min-width:22px;}
+.am-cbadge.am-hi{background:var(--accent);color:#fff;}
+.am-foot{font-size:11px;color:var(--muted);margin-top:10px;text-align:right;}
+.am-empty{padding:36px 16px;text-align:center;color:var(--muted);font-size:13.5px;}
 .cmp{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
 .cmp:last-child{border-bottom:none;}
 .cdot{width:13px;height:13px;border-radius:50%;flex:0 0 auto;}
@@ -1080,6 +1120,12 @@ body.presentation-mode{background:var(--card);}
   .wl-toolbar{flex-direction:column;align-items:stretch;}
   .wl-search input{min-width:0;width:100%;}
   .wl-segwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  /* assignment matrix: modal near-fullscreen, table scrolls horizontally inside its own wrap (page never overflows) */
+  .modal{padding:8px;}
+  .am-card{max-width:100vw;max-height:96vh;padding:16px;}
+  .am-toolbar input,.am-toolbar select{flex:1 1 100%;min-width:0;}
+  .dash-hero-actions{width:100%;}
+  .dash-hero-actions .tb-cta{flex:1 1 auto;justify-content:center;}
 
   /* [5] Org chart — collapse the fixed 5-col band grid to a single readable column (bands stack, no tiny cells) */
   .org{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -1272,7 +1318,10 @@ body.presentation-mode{background:var(--card);}
 <div id="dashboardView">
   <div class="dash-hero no-print">
     <div><h1 data-i18n="dash.title">แดชบอร์ดบุคคล · HR</h1><div class="sub" data-i18n="dash.sub">ภาพรวมกำลังพล</div></div>
-    <button class="primary tb-cta" onclick="exportDashboard()" title="พิมพ์หรือบันทึกเป็น PDF (เปิด Background graphics ในกล่องพิมพ์)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg><span class="lbl">พิมพ์ / Export PDF</span></button>
+    <div class="dash-hero-actions">
+      <button class="tb-cta cta-outline" onclick="openAssignMatrix()" title="กำหนดพนักงานเข้าโปรดักส์ (ป้อนข้อมูลภาระงาน)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span class="lbl" data-i18n="am.open">จับคู่คน↔โปรดักส์</span></button>
+      <button class="primary tb-cta" onclick="exportDashboard()" title="พิมพ์หรือบันทึกเป็น PDF (เปิด Background graphics ในกล่องพิมพ์)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg><span class="lbl">พิมพ์ / Export PDF</span></button>
+    </div>
   </div>
   <div id="workloadSection"></div>
   <div class="chips dash-chips" id="chips"></div>
@@ -1519,6 +1568,24 @@ body.presentation-mode{background:var(--card);}
       <button onclick="closeModal('quickAssignModal')">Cancel</button>
       <button class="primary" onclick="createPersonHere()">+ สร้างคนใหม่ที่นี่</button>
     </div>
+  </div>
+</div>
+
+<!-- Assignment Matrix: people × products checkbox grid (feeds the workload dashboard) -->
+<div class="modal" id="assignMatrixModal" role="dialog" aria-modal="true" aria-labelledby="amTitle">
+  <div class="modal-card wide am-card">
+    <div class="am-head">
+      <h2 id="amTitle" data-i18n="am.title">จับคู่คน ↔ โปรดักส์</h2>
+      <button class="am-x" onclick="closeAssignMatrix()" aria-label="close">✕</button>
+    </div>
+    <div class="am-sub" data-i18n="am.sub">ติ๊กเพื่อกำหนดพนักงานเข้าโปรดักส์ — ข้อมูลนี้ป้อนแดชบอร์ดภาระงานทันที</div>
+    <div class="am-toolbar">
+      <input type="search" id="amSearch" maxlength="60" oninput="_amSearchInput(this.value)" placeholder="ค้นหาชื่อ / ตำแหน่ง" data-i18n-ph="am.searchph">
+      <select id="amCompany" onchange="_amFilterChange()"></select>
+      <select id="amTeam" onchange="_amFilterChange()"></select>
+      <select id="amStatus" onchange="_amFilterChange()"></select>
+    </div>
+    <div id="amBody"></div>
   </div>
 </div>
 
@@ -1805,6 +1872,7 @@ const I18N={
   "legend.empty":"ว่าง","legend.reserved":"จองไว้","legend.wfh":"ทำงานออนไลน์ · WFH","legend.emptype":"PT พาร์ทไทม์ · FL ฟรีแลนซ์ · INT ฝึกงาน","badge.new":"ใหม่","seat.empty":"ว่าง","seat.reserved":"จอง",
   "dash.title":"แดชบอร์ดบุคคล · HR","dash.sub":"ภาพรวมกำลังพล Thunder Solution · Easy Slip — ชั้น 2",
   "wl.title":"ภาระงาน — ใครอยู่โปรดักส์ไหนบ้าง","wl.chip.has":"มีโปรดักส์","wl.chip.none":"ยังไม่มีโปรดักส์","wl.chip.multi":"อยู่ 2+ โปรดักส์","wl.chip.max":"โหลดสูงสุด (โปรดักส์)","wl.f.all":"ทั้งหมด","wl.f.0":"0","wl.f.1":"1","wl.f.2":"2+","wl.f.3":"3+","wl.searchph":"ค้นหา ชื่อ / ตำแหน่ง / โปรดักส์","wl.col.person":"พนักงาน","wl.col.count":"จำนวนโปรดักส์","wl.col.products":"โปรดักส์","wl.col.load":"ภาระงาน","wl.empty":"ยังไม่มีใครถูกกำหนดเข้าโปรดักส์ — เพิ่มคนเข้าเลนในหน้าโปรดักส์ก่อน","wl.nomatch":"ไม่พบพนักงานที่ตรงเงื่อนไข",
+  "am.open":"จับคู่คน↔โปรดักส์","am.title":"จับคู่คน ↔ โปรดักส์","am.sub":"ติ๊กเพื่อกำหนดพนักงานเข้าโปรดักส์ — ข้อมูลป้อนแดชบอร์ดภาระงานทันที","am.searchph":"ค้นหาชื่อ / ตำแหน่ง","am.allteam":"ทุกทีม","am.col.person":"พนักงาน","am.col.count":"รวม","am.noproducts":"ยังไม่มีโปรดักส์ — สร้างในหน้าโปรดักส์ก่อน","am.nopeople":"ไม่พบพนักงานที่ตรงเงื่อนไข","am.foot":"{n} คน × {p} โปรดักส์ · ติ๊กบันทึกอัตโนมัติ",
   "hr.headcount":"อัตรากำลังรวม","hr.active":"ทำงานปกติ","hr.newhire":"พนักงานใหม่","hr.awaiting":"รอจัดโต๊ะ","hr.reserved":"โต๊ะจองไว้","hr.avgteam":"ขนาดทีมเฉลี่ย","hr.seated":"มีโต๊ะแล้ว",
   "hr.startin":"เริ่มอีก {d} วัน","hr.starttoday":"เริ่มวันนี้","hr.startedago":"เริ่มมาแล้ว {d} วัน","hr.nodesk":"ยังไม่จองโต๊ะ","hr.alldesk":"ทุกคนมีโต๊ะแล้ว","hr.reservedfor":"โต๊ะที่จองไว้:","hr.noteam":"(ไม่ระบุทีม)",
   "hr.panel.onboarding":"Onboarding & ความพร้อมรับเข้า","hr.panel.status":"สถานะกำลังพล","hr.panel.brand":"แยกตามบริษัท","hr.panel.team":"โครงสร้างทีม (ประมาณ span)","hr.panel.tenure":"อายุงาน","hr.panel.coloc":"แบรนด์ต่อห้อง",
@@ -1835,6 +1903,7 @@ const I18N={
   "legend.empty":"Empty","legend.reserved":"Reserved","legend.wfh":"Remote · WFH","legend.emptype":"PT Part-time · FL Freelance · INT Intern","badge.new":"NEW","seat.empty":"EMPTY","seat.reserved":"HOLD",
   "dash.title":"HR Dashboard","dash.sub":"Workforce overview · Thunder Solution · Easy Slip — Floor 2",
   "wl.title":"Workload — who’s on which products","wl.chip.has":"Has products","wl.chip.none":"No products yet","wl.chip.multi":"On 2+ products","wl.chip.max":"Max load (products)","wl.f.all":"All","wl.f.0":"0","wl.f.1":"1","wl.f.2":"2+","wl.f.3":"3+","wl.searchph":"Search name / role / product","wl.col.person":"Employee","wl.col.count":"Products","wl.col.products":"Products","wl.col.load":"Workload","wl.empty":"No one is assigned to a product yet — add people to lanes in the Products view first","wl.nomatch":"No employees match the filter",
+  "am.open":"Assign people↔products","am.title":"Assign people ↔ products","am.sub":"Tick to assign employees to products — this feeds the workload dashboard instantly","am.searchph":"Search name / role","am.allteam":"All teams","am.col.person":"Employee","am.col.count":"Total","am.noproducts":"No products yet — create one in the Products view first","am.nopeople":"No employees match the filter","am.foot":"{n} people × {p} products · ticks auto-save",
   "hr.headcount":"Total headcount","hr.active":"Active","hr.newhire":"New hires","hr.awaiting":"Awaiting desk","hr.reserved":"Reserved desks","hr.avgteam":"Avg team size","hr.seated":"Seated",
   "hr.startin":"starts in {d}d","hr.starttoday":"starts today","hr.startedago":"{d}d in role","hr.nodesk":"no desk yet","hr.alldesk":"Everyone has a desk","hr.reservedfor":"Reserved for:","hr.noteam":"(no team)",
   "hr.panel.onboarding":"Onboarding & readiness","hr.panel.status":"Workforce status","hr.panel.brand":"Headcount by company","hr.panel.team":"Team composition (span proxy)","hr.panel.tenure":"Tenure","hr.panel.coloc":"Brand by room",
@@ -2527,6 +2596,76 @@ function renderWorkload(){
 }
 function setWorkloadFilter(v){ workloadFilter=v; renderWorkload(); }
 function _wlSearchInput(v){ workloadSearch=v; renderWorkload(); const el=document.getElementById("wlSearch"); if(el){el.focus();try{const n=el.value.length;el.setSelectionRange(n,n);}catch(e){}} }
+/* ---- Assignment Matrix: people × products checkbox grid (feeds the workload dashboard) ---- */
+let amSearch="", amCompany="", amTeam="", amStatus="";
+// a product must own at least one lane to hold members (normalize kicks {product,lane:null}) — create a default lane on demand
+function ensureProductHasLane(pr){
+  if(!pr)return null;
+  if(!Array.isArray(pr.lanes))pr.lanes=[];
+  if(!pr.lanes.length)pr.lanes.push({id:"ln-"+Math.random().toString(36).slice(2,7),name:L("ทั่วไป","General")});
+  return pr.lanes[0].id;
+}
+function _amPeople(){
+  return (state.people||[]).filter(p=>p.status!=="owner")
+    .filter(p=>!amCompany||p.company===amCompany)
+    .filter(p=>!amTeam||(p.team||"")===amTeam)
+    .filter(p=>!amStatus||p.status===amStatus)
+    .filter(p=>{ if(!amSearch)return true; const q=amSearch.trim().toLowerCase(); return [(p.nickname||""),(p.fullName||""),(p.role||""),(p.team||"")].join(" ").toLowerCase().indexOf(q)>=0; })
+    .sort((a,b)=>(a.nickname||"").localeCompare(b.nickname||""));
+}
+// toggle a person's membership in a product (default lane). check → assign; uncheck → remove. persists via _withSaveRollback.
+function toggleAssign(personId,productId,checked){
+  if(isLocked){toast(T_LOCKED);return;}
+  const person=state.people.find(p=>p.id===personId); if(!person)return;
+  const prod=(state.products||[]).find(x=>x.id===productId); if(!prod)return;
+  const ok=_withSaveRollback(
+    ()=>{
+      const arr=person.products||(person.products=[]);
+      if(checked){
+        const lid=ensureProductHasLane(prod); // guarantees a real lane id — never store lane:null
+        const a=arr.find(x=>x.product===productId);
+        if(a){ if(!a.lane)a.lane=lid; } else { arr.push({product:productId,lane:lid}); }
+      } else {
+        person.products=arr.filter(x=>x.product!==productId);
+      }
+    },
+    ()=>{ renderAssignMatrix(); try{if(document.body.classList.contains("view-dashboard")){renderWorkload();renderChips();}}catch(e){} }
+  );
+  if(!ok)renderAssignMatrix(); // save failed → _withSaveRollback reverted state; resync the checkbox to truth
+}
+function renderAssignMatrix(){
+  const host=document.getElementById("amBody"); if(!host)return;
+  const prods=(state.products||[]);
+  const people=_amPeople();
+  if(!prods.length){ host.innerHTML='<div class="am-empty">'+t("am.noproducts")+'</div>'; return; }
+  if(!people.length){ host.innerHTML='<div class="am-empty">'+t("am.nopeople")+'</div>'; return; }
+  const head='<thead><tr><th class="am-pcol">'+t("am.col.person")+'</th>'+
+    prods.map(pr=>'<th class="am-prod">'+escapeHtml(pr.name||pr.id)+'</th>').join("")+
+    '<th class="am-cnt">'+t("am.col.count")+'</th></tr></thead>';
+  const rows=people.map(p=>{
+    const cnt=(p.products||[]).filter(a=>a&&a.product&&prods.some(pr=>pr.id===a.product)).length;
+    const av='<span class="pc-av '+companyClass(p.company)+'"'+((p.photo&&/^data:image\//.test(p.photo))?(' style="'+_photoBg(p.photo,"")+'"'):'')+'>'+(p.photo?'':escapeHtml((p.nickname||"?").charAt(0)))+'</span>';
+    const nameCell='<td class="am-pcol"><div class="am-person">'+av+'<div class="am-pmeta"><div class="am-nm">'+escapeHtml(p.nickname||"—")+'</div>'+((p.role||p.team)?('<div class="am-sub">'+escapeHtml([p.role,p.team].filter(Boolean).join(" · "))+'</div>'):'')+'</div></div></td>';
+    const cells=prods.map(pr=>{
+      const on=personInProject(p,pr.id);
+      return '<td class="am-cell"><label class="am-check"><input type="checkbox"'+(on?" checked":"")+' onchange="toggleAssign('+attr(p.id)+','+attr(pr.id)+',this.checked)" aria-label="'+escapeHtml((p.nickname||"")+" · "+(pr.name||pr.id))+'"><span class="am-box"></span></label></td>';
+    }).join("");
+    return '<tr>'+nameCell+cells+'<td class="am-cnt"><span class="badge am-cbadge'+(cnt>=2?" am-hi":"")+'">'+cnt+'</span></td></tr>';
+  }).join("");
+  host.innerHTML='<div class="am-tablewrap"><table class="am-tbl">'+head+'<tbody>'+rows+'</tbody></table></div>'+
+    '<div class="am-foot">'+t("am.foot",{n:people.length,p:prods.length})+'</div>';
+}
+function _amFillFilters(){
+  const P=(state.people||[]).filter(p=>p.status!=="owner");
+  const teams=[...new Set(P.map(p=>p.team).filter(Boolean))].sort();
+  const co=document.getElementById("amCompany"); if(co)co.innerHTML='<option value="">'+t("mf.allco")+'</option>'+["Thunder Solution","Easy Slip","Other"].map(c=>'<option'+(amCompany===c?" selected":"")+'>'+c+'</option>').join("");
+  const tm=document.getElementById("amTeam"); if(tm)tm.innerHTML='<option value="">'+t("am.allteam")+'</option>'+teams.map(x=>'<option'+(amTeam===x?" selected":"")+'>'+escapeHtml(x)+'</option>').join("");
+  const st=document.getElementById("amStatus"); if(st)st.innerHTML='<option value="">'+t("mf.allst")+'</option>'+[["active","st.active"],["new-hire","st.newhire"],["remote","st.remote"],["hybrid","st.hybrid"]].map(([v,k])=>'<option value="'+v+'"'+(amStatus===v?" selected":"")+'>'+t(k)+'</option>').join("");
+}
+function _amFilterChange(){ amCompany=(document.getElementById("amCompany")||{}).value||""; amTeam=(document.getElementById("amTeam")||{}).value||""; amStatus=(document.getElementById("amStatus")||{}).value||""; renderAssignMatrix(); }
+function _amSearchInput(v){ amSearch=v; renderAssignMatrix(); const el=document.getElementById("amSearch"); if(el){el.focus();try{const n=el.value.length;el.setSelectionRange(n,n);}catch(e){}} }
+function openAssignMatrix(){ if(isLocked){toast(T_LOCKED);return;} amSearch="";amCompany="";amTeam="";amStatus=""; const s=document.getElementById("amSearch"); if(s)s.value=""; _amFillFilters(); renderAssignMatrix(); openModal("assignMatrixModal"); }
+function closeAssignMatrix(){ closeModal("assignMatrixModal"); try{if(document.body.classList.contains("view-dashboard")){renderWorkload();renderChips();renderDashboard();}}catch(e){} }
 function renderDashboard(){
   const ex=document.getElementById("dashExtra"); if(!ex)return;
   const m=computeHR(), P=m.P;
