@@ -3674,22 +3674,137 @@ function importAll(ev){
   const r=new FileReader();
   r.onload=e=>{try{
     const b=JSON.parse(e.target.result);
-    if(!b||b.__bundle!=="seatmap-full")throw new Error("ไม่ใช่ไฟล์สำรองครบชุด — ใช้ Import ปกติสำหรับไฟล์ที่นั่ง");
-    let cand=migrate(clone(b.state));validateState(cand);
-    if(!confirm(L("แทนที่ข้อมูลทั้งหมด (ที่นั่ง + ผังองค์กร + เทมเพลต + มุมมอง) ด้วยไฟล์นี้?\nข้อมูลปัจจุบันจะถูกทับ","Replace all data (seating + org chart + templates + views) with this file?\nCurrent data will be overwritten")))return;
-    const snap=snapshot();pushUndo();
-    state=cand;repairOrphans(state);
-    if(!save()){try{state=JSON.parse(snap);}catch(e){}render();return;}
-    if(Array.isArray(b.orgCompanies)){
-      const _oldIds=loadUserOrgCompanies().map(c=>c.id), _newIds=b.orgCompanies.map(c=>c&&c.id).filter(Boolean);
-      _oldIds.filter(x=>_newIds.indexOf(x)<0).forEach(x=>{try{localStorage.removeItem("osp.org.user."+x+".v1");localStorage.removeItem("osp.org.user."+x+".v1.lkg");}catch(e){}});
-      saveUserOrgCompanies(b.orgCompanies);rebuildOrgDefs();
+    if(!b||typeof b!=="object"||b.__bundle!=="seatmap-full")throw new Error("ไม่ใช่ไฟล์สำรองครบชุด — ใช้ Import ปกติสำหรับไฟล์ที่นั่ง");
+
+    // ── VALIDATE PHASE: validate the ENTIRE bundle before touching any storage or in-memory state.
+    // Any failure here throws and nothing has changed yet (no key written, no company removed).
+    // Strict-first (same as importJSON): reject malformed enums/refs up front instead of letting
+    // migrate()/repairOrphans() silently normalize or drop them.
+    const rawState=clone(b.state);validateStateStrict(rawState);
+    const cand=migrate(rawState);validateState(cand);repairOrphans(cand);
+
+    // orgCompanies list: must be an array of {id,...}; ids unique + string.
+    let orgCompanies=[];
+    if(b.orgCompanies!==undefined){
+      if(!Array.isArray(b.orgCompanies))throw new Error("orgCompanies ไม่ใช่ array");
+      const seenCo=new Set();
+      for(const c of b.orgCompanies){
+        if(!c||typeof c!=="object"||typeof c.id!=="string"||!c.id)throw new Error("orgCompanies มีบริษัทไม่มี id");
+        if(seenCo.has(c.id))throw new Error("orgCompanies มี id ซ้ำ "+c.id);
+        seenCo.add(c.id);
+      }
+      orgCompanies=b.orgCompanies;
     }
-    if(b.org&&typeof b.org==="object")Object.keys(b.org).forEach(k=>{if(Object.values(ORG_DEFS).some(d=>d.key===k)){try{localStorage.setItem(k,JSON.stringify(b.org[k]));}catch(e){}}});
-    if(b.templates&&typeof b.templates==="object"){tpls={seating:Array.isArray(b.templates.seating)?b.templates.seating:[],org:Array.isArray(b.templates.org)?b.templates.org:[]};saveTpls();}
-    if(Array.isArray(b.views)){_customViews=b.views;saveViewsLocal(_customViews);}
+    // Compute the key allowlist the incoming file is allowed to write: built-in org keys + the incoming user companies.
+    const allowedOrgKeys=new Set();
+    Object.values(ORG_BUILTINS).forEach(d=>allowedOrgKeys.add(d.key));
+    orgCompanies.forEach(c=>{if(c&&typeof c.id==="string"&&!ORG_BUILTINS[c.id])allowedOrgKeys.add("osp.org.user."+c.id+".v1");});
+
+    // Per-company org states: validate every one via migrateOrg()+validateOrg() before staging.
+    // company id is derived from the key (osp.org.user.<id>.v1 or a built-in key).
+    const _keyToCompany={};Object.keys(ORG_BUILTINS).forEach(id=>{_keyToCompany[ORG_BUILTINS[id].key]=id;});
+    orgCompanies.forEach(c=>{if(c&&typeof c.id==="string")_keyToCompany["osp.org.user."+c.id+".v1"]=c.id;});
+    const orgStaged=[]; // {key, blob}
+    if(b.org!==undefined){
+      if(!b.org||typeof b.org!=="object"||Array.isArray(b.org))throw new Error("org ไม่ใช่ object");
+      for(const k of Object.keys(b.org)){
+        if(!allowedOrgKeys.has(k))throw new Error("org มี key ที่ไม่รู้จัก "+k); // reject unknown/injected keys
+        const company=_keyToCompany[k];if(!company)throw new Error("org key ไม่ผูกกับบริษัท "+k);
+        const migrated=validateOrg(migrateOrg(clone(b.org[k]),company));
+        orgStaged.push({key:k,blob:JSON.stringify(migrated)});
+      }
+    }
+
+    // templates + views: shape check + element-level validation (reject malformed, don't silently coerce to []).
+    const _tplList=(arr,kind)=>{ if(arr===undefined)return []; if(!Array.isArray(arr))throw new Error("templates."+kind+" ไม่ใช่ array"); for(const t of arr){ if(!t||typeof t!=="object"||Array.isArray(t))throw new Error("templates."+kind+" มี element ไม่ใช่ object"); if(t.id!=null&&typeof t.id!=="string")throw new Error("templates."+kind+" id ไม่ใช่ string"); } return arr; };
+    let templates=null;
+    if(b.templates!==undefined){
+      if(!b.templates||typeof b.templates!=="object"||Array.isArray(b.templates))throw new Error("templates ไม่ใช่ object");
+      templates={seating:_tplList(b.templates.seating,"seating"),org:_tplList(b.templates.org,"org")};
+    }
+    let views=null;
+    if(b.views!==undefined){
+      if(!Array.isArray(b.views))throw new Error("views ไม่ใช่ array");
+      for(const v of b.views){ if(!v||typeof v!=="object"||Array.isArray(v))throw new Error("views มี element ไม่ใช่ object"); if(v.id!=null&&typeof v.id!=="string")throw new Error("views id ไม่ใช่ string"); }
+      views=b.views;
+    }
+
+    // Everything validated. Confirm with the user only now.
+    if(!confirm(L("แทนที่ข้อมูลทั้งหมด (ที่นั่ง + ผังองค์กร + เทมเพลต + มุมมอง) ด้วยไฟล์นี้?\nข้อมูลปัจจุบันจะถูกทับ","Replace all data (seating + org chart + templates + views) with this file?\nCurrent data will be overwritten")))return;
+
+    // ── STAGE PHASE: serialize all writes + snapshot every key we may touch, for full rollback.
+    // Stamp lastSavedAt BEFORE serializing, so the persisted LS_KEY, in-memory state, IDB backup and
+    // KV push all carry the SAME timestamp — otherwise LS_KEY keeps the old time while memory/IDB/KV
+    // get a newer one, and a reload makes the "saved at" time appear to go backwards.
+    if(cand.meta)cand.meta.lastSavedAt=nowISO();
+    const stateBlob=JSON.stringify(cand);        // seating (written via LS_KEY below)
+    // Preserve the pre-import seating as Last-Known-Good, exactly like save() does before overwriting
+    // LS_KEY — otherwise a full restore silently skips the LKG bump and "Restore LKG" hands back a
+    // stale snapshot instead of the state right before this import. Only promote a parseable+valid
+    // current LS_KEY (a corrupt current value must not overwrite a good LKG).
+    let lkgBlob=null;
+    try{const prev=localStorage.getItem(LS_KEY);if(prev){validateState(JSON.parse(prev));lkgBlob=prev;}}catch(e){lkgBlob=null;}
+    // Only reconcile the org-company registry when the bundle actually carries orgCompanies.
+    // A legacy bundle (no orgCompanies field) must PRESERVE the existing company list + all
+    // osp.org.user.* stores — it never carried them, so it has no authority to delete them.
+    const removeKeys=[];
+    if(b.orgCompanies!==undefined){
+      const oldIds=loadUserOrgCompanies().map(c=>c&&c.id).filter(Boolean);
+      const newIds=orgCompanies.map(c=>c&&c.id).filter(Boolean);
+      oldIds.filter(x=>newIds.indexOf(x)<0).forEach(x=>{removeKeys.push("osp.org.user."+x+".v1","osp.org.user."+x+".v1.lkg");});
+    }
+    // Backup the current raw value of every key we might set OR remove, so we can restore exactly.
+    const touchedKeys=new Set([LS_KEY]);
+    if(lkgBlob!==null)touchedKeys.add(LS_LKG);
+    if(b.orgCompanies!==undefined)touchedKeys.add(USER_ORG_KEY);
+    orgStaged.forEach(o=>touchedKeys.add(o.key));
+    removeKeys.forEach(k=>touchedKeys.add(k));
+    if(templates)touchedKeys.add(TPL_KEY);
+    if(views)touchedKeys.add(VIEWS_KEY);
+    const backup={};touchedKeys.forEach(k=>{try{backup[k]=localStorage.getItem(k);}catch(e){backup[k]=null;}});
+    const memSnap=snapshot();const memTpls=clone(tpls);const memViews=clone(_customViews);const memOrgCompany=orgCompany;
+
+    // ── COMMIT PHASE: write everything; on ANY failure, roll back every key + in-memory state.
+    const rollback=()=>{
+      Object.keys(backup).forEach(k=>{try{if(backup[k]===null)localStorage.removeItem(k);else localStorage.setItem(k,backup[k]);}catch(e){}});
+      try{state=JSON.parse(memSnap);}catch(e){}
+      tpls=memTpls;_customViews=memViews;orgCompany=memOrgCompany;
+      rebuildOrgDefs();orgState=loadOrgState(orgCompany);
+    };
+    try{
+      // Bump LKG first (in the same batch), so the pre-import state is safe before we overwrite LS_KEY.
+      if(lkgBlob!==null)localStorage.setItem(LS_LKG,lkgBlob);
+      localStorage.setItem(LS_KEY,stateBlob);
+      if(b.orgCompanies!==undefined)localStorage.setItem(USER_ORG_KEY,JSON.stringify(orgCompanies));
+      orgStaged.forEach(o=>localStorage.setItem(o.key,o.blob));
+      if(templates)localStorage.setItem(TPL_KEY,JSON.stringify(templates));
+      if(views)localStorage.setItem(VIEWS_KEY,JSON.stringify(views));
+      // Only after every new write succeeds do we remove the now-orphaned old org companies.
+      removeKeys.forEach(k=>localStorage.removeItem(k));
+    }catch(err){
+      rollback();
+      alert(L("Import ไม่สำเร็จ (บันทึกล้ม — ข้อมูลเดิมถูกคืนครบ): ","Import failed (write error — original data fully restored): ")+(err&&err.message||err));
+      return;
+    }
+
+    // ── SUCCESS: adopt into memory from the just-written stores.
+    pushUndo();
+    state=cand;
+    if(b.orgCompanies!==undefined)rebuildOrgDefs();
+    if(templates)tpls=templates;
+    if(views)_customViews=views;
     if(!ORG_DEFS[orgCompany])orgCompany="thunder";
     orgUndoStack=[];orgRedoStack=[];orgState=loadOrgState(orgCompany);
+    // We wrote LS_KEY directly (not via save()), so replicate save()'s post-write bookkeeping and
+    // schedule the shared-KV push ONCE — the direct-write path otherwise skips it, so a full restore
+    // would look "done" locally but never propagate to KV / other machines. Only reached on success;
+    // never during staging or rollback.
+    // lastSavedAt was already stamped on cand (=state) before serializing LS_KEY, so LS_KEY, memory,
+    // IDB and KV all carry the same timestamp — do NOT re-stamp here or it would diverge from LS_KEY.
+    _invalidateQuota();dirty=false;
+    try{backupToIDB(state);}catch(e){}
+    renderSavedLine();
+    try{_scheduleSharedPush();}catch(e){}
     render();updateOrgCompanyUI();
     toast(L("กู้คืนครบชุดแล้ว","Full restore done"));
   }catch(err){alert(L("Import ไม่สำเร็จ: ","Import failed: ")+(err&&err.message||err));}};
