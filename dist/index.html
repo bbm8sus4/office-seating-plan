@@ -2312,7 +2312,10 @@ function renderSeat(sid){
   if(p){
     const col=companyColor(p.company), isNew=p.status==="new-hire", remote=p.status==="remote", hybrid=p.status==="hybrid", owner=p.status==="owner";
     const title=(p.fullName||p.nickname)+" — "+(p.role||"")+" — "+p.company;
-    return '<div class="seat occupied'+(remote?" remote":"")+'" data-person="'+escapeHtml(p.id)+'" data-seat="'+escapeHtml(sid)+'" tabindex="0" role="button" aria-label="'+escapeHtml(title)+'" title="'+escapeHtml(title)+'">'+
+    // Accessible name carries a keyboard hint: normally "press Enter to pick up"; while a pickup is pending this
+    // seat is a drop target → "press Enter to swap here"; the picked-up seat itself → "press Enter/Esc to cancel".
+    const _kbHint=isLocked?"":(_kbPick?(_kbPick.seatId===sid?L(" — กด Enter หรือ Esc เพื่อยกเลิก"," — press Enter or Esc to cancel"):L(" — กด Enter เพื่อสลับที่นั่งมาที่นี่"," — press Enter to swap here")):L(" — กด Enter เพื่อหยิบย้าย"," — press Enter to pick up and move"));
+    return '<div class="seat occupied'+(remote?" remote":"")+'" data-person="'+escapeHtml(p.id)+'" data-seat="'+escapeHtml(sid)+'" tabindex="0" role="button" aria-label="'+escapeHtml(title+_kbHint)+'"'+(_kbPick&&_kbPick.seatId===sid?' aria-grabbed="true"':'')+' onkeydown="onSeatKeydown(event,'+attr(sid)+')" title="'+escapeHtml(title)+'">'+
       '<div class="av'+(p.photo?' has-photo':'')+'" style="'+_photoBg(p.photo,col)+'">'+(p.photo?'':escapeHtml((p.nickname||"?").charAt(0)))+'<span class="co" style="background:'+col+'">'+companyLetter(p.company)+'</span></div>'+
       '<div class="nm">'+escapeHtml(p.nickname)+'</div>'+
       '<div class="rl">'+escapeHtml(p.role||companyShort(p.company))+'</div>'+
@@ -2326,7 +2329,9 @@ function renderSeat(sid){
   if(hold){
     return '<div class="seat reserved" data-seat="'+escapeHtml(sid)+'" tabindex="0" role="button" onclick="clearHoldPrompt('+attr(sid)+')" title="จอง: '+escapeHtml(hold.label)+'"><div class="av">R</div><div class="nm">'+t("seat.reserved")+'</div><div class="rl">'+escapeHtml(hold.label||"")+'</div></div>';
   }
-  return '<div class="seat empty" data-seat="'+escapeHtml(sid)+'" tabindex="0" role="button" onclick="openQuickAssign('+attr(sid)+')" title="คลิกเพื่อจัดคน / จองที่นั่ง"><div class="av">+</div><div class="nm">EMPTY</div></div>';
+  // Empty seat: while a pickup is pending its accessible name invites a drop; otherwise it's the normal assign action.
+  const _emptyLabel=(_kbPick&&!isLocked)?L("ที่นั่งว่าง — กด Enter เพื่อวางที่นี่","Empty seat — press Enter to place here"):L("ที่นั่งว่าง — กด Enter เพื่อจัดคนหรือจอง","Empty seat — press Enter to assign or reserve");
+  return '<div class="seat empty" data-seat="'+escapeHtml(sid)+'" tabindex="0" role="button" aria-label="'+escapeHtml(_emptyLabel)+'" onclick="openQuickAssign('+attr(sid)+')" onkeydown="onEmptySeatKeydown(event,'+attr(sid)+')" title="คลิกเพื่อจัดคน / จองที่นั่ง"><div class="av">+</div><div class="nm">EMPTY</div></div>';
 }
 /* ---- architectural floor plan (rooms as building boxes, seats as avatars) ---- */
 function renderRoomBox(r){
@@ -3172,6 +3177,9 @@ function _activeView(){
 }
 // render() only rebuilds the VISIBLE view + global chrome; setView() calls render() after toggling classes so switching re-renders the target fresh.
 function render(){
+  // If a keyboard pickup is pending but the source seat no longer holds that person (state changed underneath —
+  // person moved/removed, or lock toggled), drop the pending state so we never re-emit a stale aria-grabbed.
+  if(_kbPick){ const _pp=getPersonAt(_kbPick.seatId); if(isLocked||!_pp||_pp.id!==_kbPick.personId)_kbClearPick(); }
   const view=_activeView();
   if(view==="seating"){
     document.getElementById("plan").innerHTML=renderFloor();
@@ -3310,6 +3318,65 @@ function performDrop(personId,info){
     },
     ()=>{ render(); toastUndo(info.type==="pool"?"ย้าย "+person.nickname+" → รอจัดที่":"ย้าย "+person.nickname+" แล้ว"); }
   );
+}
+
+/* ===================== Keyboard seat move (a11y) — parallel to pointer drag, never synthesizes pointer events =====================
+   pick-up→place model on OCCUPIED seats: Enter/Space picks the person up; Enter/Space on another seat (empty or
+   occupied→swap) places via performDrop({type:'seat'}); Esc — or Enter/Space on the same source seat — cancels.
+   Seating grid only (empty/occupied seats); reserved/pool/WFH/product are out of scope this slice. */
+let _kbPick=null; // { personId, seatId }  — module-level, independent of the pointer `drag` state
+function _srAnnounce(msg){ try{const el=document.getElementById("srAlert"); if(el){el.textContent=""; setTimeout(()=>{el.textContent=String(msg);},50);} }catch(e){} }
+function _kbClearPick(){ // drop any pending pickup + strip stale aria-grabbed left in the DOM
+  _kbPick=null;
+  try{document.querySelectorAll('.seat[aria-grabbed="true"]').forEach(el=>el.setAttribute("aria-grabbed","false"));}catch(e){}
+}
+function _kbFocusSeat(sid){ // restore focus to a seat by id after render() rebuilds the DOM; fall back to the plan container
+  try{const el=document.querySelector('.seat[data-seat="'+(window.CSS&&CSS.escape?CSS.escape(sid):sid.replace(/"/g,'\\"'))+'"]'); if(el&&el.focus){el.focus();return true;}}catch(e){}
+  try{const plan=document.getElementById("plan")||document.getElementById("rooms"); if(plan&&plan.focus){plan.focus();}}catch(e){}
+  return false;
+}
+function onSeatKeydown(e,sid){
+  const key=e.key;
+  if(key==="Escape"){ if(_kbPick){ e.preventDefault();e.stopPropagation(); _kbClearPick(); _srAnnounce(L("ยกเลิกการย้าย","Move cancelled")); } return; }
+  if(key!=="Enter"&&key!==" "&&key!=="Spacebar")return;
+  // We own this Enter/Space — stop it bubbling to the global keydown handler, which would otherwise ALSO
+  // run the seat Edit/QuickAssign shortcut on the same key (double action).
+  e.preventDefault();e.stopPropagation();
+  // Locked mode: never start or place a move; clear any stale pending state.
+  if(isLocked){ if(_kbPick)_kbClearPick(); return; }
+  if(!_kbPick){
+    // PICK UP — source must be an occupied seat.
+    const person=getPersonAt(sid); if(!person)return; // empty/reserved seats keep their own onclick behaviour
+    _kbPick={personId:person.id, seatId:sid};
+    try{const src=e.currentTarget||document.querySelector('.seat[data-seat="'+sid+'"]'); if(src)src.setAttribute("aria-grabbed","true");}catch(x){}
+    _srAnnounce(L("หยิบ ","Picked up ")+(person.nickname||person.fullName||"")+L(" — ไปที่นั่งปลายทางแล้วกด Enter เพื่อวาง, Esc ยกเลิก"," — move to a seat and press Enter to place, Esc to cancel"));
+    return;
+  }
+  // PLACE (or cancel if it's the same source seat).
+  const pick=_kbPick;
+  if(sid===pick.seatId){ _kbClearPick(); _srAnnounce(L("ยกเลิกการย้าย","Move cancelled")); return; }
+  const person=state.people.find(p=>p.id===pick.personId);
+  if(!person){ _kbClearPick(); return; } // person vanished (stale) — abort silently, nothing to announce
+  const swapWith=getPersonAt(sid); // occupied target → swap
+  _kbClearPick();
+  performDrop(pick.personId,{type:"seat",seatId:sid,personId:pick.personId});
+  // Announce success ONLY if the move actually took effect (performDrop → _withSaveRollback may have rolled back on save failure).
+  if(getPersonAt(sid)&&getPersonAt(sid).id===pick.personId){
+    _srAnnounce(L("ย้าย ","Moved ")+(person.nickname||"")+(swapWith?L(" สลับกับ ","— swapped with ")+(swapWith.nickname||""):"")+L(" แล้ว"," "));
+    _kbFocusSeat(sid); // follow the person to the destination seat
+  }else{
+    _srAnnounce(L("ย้ายไม่สำเร็จ","Move failed")); // save failed / rolled back — do NOT claim success
+    _kbFocusSeat(pick.seatId);
+  }
+}
+// Empty seat: only acts as a PLACE target while a pickup is pending. With no pending pickup it does nothing here,
+// so the seat's own onclick (openQuickAssign) keeps working via the browser's default Enter→click behaviour.
+function onEmptySeatKeydown(e,sid){
+  if(!_kbPick)return;                       // no pickup pending → let default onclick handle Enter/Space
+  const key=e.key;
+  if(key==="Escape"){ e.preventDefault();e.stopPropagation(); _kbClearPick(); _srAnnounce(L("ยกเลิกการย้าย","Move cancelled")); return; }
+  if(key!=="Enter"&&key!==" "&&key!=="Spacebar")return;
+  onSeatKeydown(e,sid);                      // reuse the place path (stops propagation there; empty target = plain move)
 }
 
 /* Assign a waiting person into a room — clicking a tray chip picks a room, we drop them in its first free seat */
@@ -3653,7 +3720,7 @@ function deleteRoom(){
 }
 
 function toggleFilter(kind,value){const set=filters[kind];if(!set)return;if(set.has(value))set.delete(value);else set.add(value);render();}
-function toggleLock(){isLocked=!isLocked;try{localStorage.setItem("osp.locked",isLocked?"1":"0");}catch(e){}render();toast(isLocked?L("ล็อกแล้ว (ดูอย่างเดียว)","Locked (view-only)"):L("ปลดล็อกแล้ว","Unlocked"));}
+function toggleLock(){isLocked=!isLocked;try{localStorage.setItem("osp.locked",isLocked?"1":"0");}catch(e){}if(_kbPick)_kbClearPick();render();toast(isLocked?L("ล็อกแล้ว (ดูอย่างเดียว)","Locked (view-only)"):L("ปลดล็อกแล้ว","Unlocked"));}
 function applyTheme(th){document.documentElement.setAttribute("data-theme",th);try{localStorage.setItem("osp.theme",th);}catch(e){}const b=document.getElementById("themeBtn");if(b){b.innerHTML=icon(th==="dark"?"sun":"moon");b.setAttribute("aria-label",th==="dark"?"Light theme":"Dark theme");}}
 function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");}
 function togglePresentation(){const on=document.body.classList.toggle("presentation-mode");if(on){try{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();}catch(e){}}else{try{document.fullscreenElement&&document.exitFullscreen();}catch(e){}}}
@@ -4021,6 +4088,10 @@ window.addEventListener("storage",e=>{
 });
 ["personModal","roomModal","quickAssignModal","rosterModal","orgModal","tplModal","linkOrgModal","welcomeModal","shortcutsModal","changelogModal","prodAssignModal","projManagerModal","orgBandsModal","prodLanesModal","assignRoomModal","orgPersonModal","wfhAssignModal","inputModal"].forEach(id=>{const _el=document.getElementById(id);if(_el)_el.addEventListener("click",e=>{if(e.target.id===id)closeModal(id);});});
 document.addEventListener("keydown",e=>{const inField=/input|select|textarea/i.test((e.target.tagName||""));const topModal=_topOpenModal();
+  // Cancel a pending keyboard seat pickup from ANYWHERE with Escape (focus may have moved to a reserved seat,
+  // the toolbar, or empty space where the seat handlers don't run). Only when no modal is open, so modal-close
+  // Escape keeps priority. Runs before the other shortcuts below.
+  if(e.key==="Escape"&&_kbPick&&!topModal){e.preventDefault();_kbClearPick();_srAnnounce(L("ยกเลิกการย้าย","Move cancelled"));return;}
   // Focus trap: Tab wraps inside topmost open modal
   if(topModal&&e.key==="Tab"){const focusables=_focusableInModal(topModal);if(focusables.length){const first=focusables[0],last=focusables[focusables.length-1];const active=document.activeElement;if(e.shiftKey&&active===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&active===last){e.preventDefault();first.focus();}else if(!topModal.contains(active)){e.preventDefault();first.focus();}}}
   // Escape: prioritize modal close, presentation-mode is separate action
@@ -4028,7 +4099,9 @@ document.addEventListener("keydown",e=>{const inField=/input|select|textarea/i.t
   if((e.metaKey||e.ctrlKey)&&(e.key==="z"||e.key==="Z")){if(inField)return;e.preventDefault();if(e.shiftKey)redo();else undo();}
   if((e.metaKey||e.ctrlKey)&&(e.key==="y"||e.key==="Y")){if(inField)return;e.preventDefault();redo();}
   if(!inField&&!topModal&&e.key==="?"){e.preventDefault();openShortcuts();}
-  if(!inField&&e.target.classList&&e.target.classList.contains("seat")&&e.key==="Enter"){if(e.target.dataset.person)editPerson(e.target.dataset.person);else if(e.target.dataset.seat&&!state.holds[e.target.dataset.seat])openQuickAssign(e.target.dataset.seat);}
+  // Skip the seat Edit/QuickAssign shortcut if the seat's own onkeydown already handled this Enter (keyboard
+   // pick-up/place calls preventDefault) — otherwise a keyboard move would ALSO open a modal on the same key.
+  if(!inField&&!e.defaultPrevented&&e.target.classList&&e.target.classList.contains("seat")&&e.key==="Enter"){if(e.target.dataset.person)editPerson(e.target.dataset.person);else if(e.target.dataset.seat&&!state.holds[e.target.dataset.seat])openQuickAssign(e.target.dataset.seat);}
   if(!inField&&e.target.classList&&e.target.classList.contains("obox")&&(e.key==="Enter"||e.key===" ")){if(e.target.dataset.id){e.preventDefault();editOrgNode(e.target.dataset.id);}}});
 window.addEventListener("beforeunload",e=>{if(dirty&&!canPersist){e.preventDefault();e.returnValue="ยังมีข้อมูลไม่บันทึก (private mode / quota เต็ม) — Export ก่อนปิด?";}});
 window.addEventListener("storage",e=>{if(e.key===LS_KEY&&e.newValue&&document.body.classList.contains("presentation-mode")&&!dirty&&!isLocked){try{const cand=migrate(JSON.parse(e.newValue));validateState(cand);repairOrphans(cand);const hadHistory=undoStack.length>0||redoStack.length>0;state=cand;undoStack=[];redoStack=[];render();toast(L("อัปเดตจาก tab อื่น","Updated from another tab")+(hadHistory?L(" · Undo history ถูกล้าง"," · Undo history cleared"):""));}catch(x){try{console.error("[storage sync] rejected bad state",x);}catch(y){}}}});
