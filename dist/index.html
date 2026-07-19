@@ -628,6 +628,7 @@ body.view-dashboard .topbar-search,body.view-settings .topbar-search,body.view-o
 .oact button{width:20px;height:20px;padding:0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;font-size:12px;font-weight:800;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 1px 3px var(--shadow,rgba(0,0,0,.15));}
 .oact button:hover{background:var(--accent);color:#fff;border-color:var(--accent);}
 .oact button .ic{width:12px;height:12px;}
+.obox[aria-grabbed="true"]{outline:2px dashed var(--accent);outline-offset:2px;}
 .tbin button.tb-cta{background:#111827;color:#fff;border:1px solid #111827;padding:8px 15px;font-size:12.5px;font-weight:700;border-radius:10px;gap:7px;box-shadow:0 1px 2px rgba(0,0,0,.2);}
 .tbin button.tb-cta .lbl{margin-left:1px;color:#fff;}
 .tbin button.tb-cta:hover{background:#2d3748;border-color:#2d3748;}
@@ -3720,7 +3721,7 @@ function deleteRoom(){
 }
 
 function toggleFilter(kind,value){const set=filters[kind];if(!set)return;if(set.has(value))set.delete(value);else set.add(value);render();}
-function toggleLock(){isLocked=!isLocked;try{localStorage.setItem("osp.locked",isLocked?"1":"0");}catch(e){}if(_kbPick)_kbClearPick();render();toast(isLocked?L("ล็อกแล้ว (ดูอย่างเดียว)","Locked (view-only)"):L("ปลดล็อกแล้ว","Unlocked"));}
+function toggleLock(){isLocked=!isLocked;try{localStorage.setItem("osp.locked",isLocked?"1":"0");}catch(e){}if(_kbPick)_kbClearPick();if(_oKbPick)_oKbClear();render();toast(isLocked?L("ล็อกแล้ว (ดูอย่างเดียว)","Locked (view-only)"):L("ปลดล็อกแล้ว","Unlocked"));}
 function applyTheme(th){document.documentElement.setAttribute("data-theme",th);try{localStorage.setItem("osp.theme",th);}catch(e){}const b=document.getElementById("themeBtn");if(b){b.innerHTML=icon(th==="dark"?"sun":"moon");b.setAttribute("aria-label",th==="dark"?"Light theme":"Dark theme");}}
 function toggleTheme(){applyTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");}
 function togglePresentation(){const on=document.body.classList.toggle("presentation-mode");if(on){try{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();}catch(e){}}else{try{document.fullscreenElement&&document.exitFullscreen();}catch(e){}}}
@@ -4091,7 +4092,7 @@ document.addEventListener("keydown",e=>{const inField=/input|select|textarea/i.t
   // Cancel a pending keyboard seat pickup from ANYWHERE with Escape (focus may have moved to a reserved seat,
   // the toolbar, or empty space where the seat handlers don't run). Only when no modal is open, so modal-close
   // Escape keeps priority. Runs before the other shortcuts below.
-  if(e.key==="Escape"&&_kbPick&&!topModal){e.preventDefault();_kbClearPick();_srAnnounce(L("ยกเลิกการย้าย","Move cancelled"));return;}
+  if(e.key==="Escape"&&(_kbPick||_oKbPick)&&!topModal){e.preventDefault();if(_kbPick)_kbClearPick();if(_oKbPick)_oKbClear();_srAnnounce(L("ยกเลิกการย้าย","Move cancelled"));return;}
   // Focus trap: Tab wraps inside topmost open modal
   if(topModal&&e.key==="Tab"){const focusables=_focusableInModal(topModal);if(focusables.length){const first=focusables[0],last=focusables[focusables.length-1];const active=document.activeElement;if(e.shiftKey&&active===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&active===last){e.preventDefault();first.focus();}else if(!topModal.contains(active)){e.preventDefault();first.focus();}}}
   // Escape: prioritize modal close, presentation-mode is separate action
@@ -4188,7 +4189,7 @@ function migrateOrg(st,company){
 function validateOrg(st){if(!st||typeof st!=="object"||!Array.isArray(st.nodes))throw new Error("org state shape");const ids=new Set();for(const n of st.nodes){if(!n||typeof n!=="object")throw new Error("bad org node");if(!n.id||typeof n.id!=="string")throw new Error("org node id");if(ids.has(n.id))throw new Error("dup org id "+n.id);ids.add(n.id);if(!Number.isFinite(n.lv))throw new Error("org lv NaN "+n.id);if(n.p===n.id)throw new Error("self parent "+n.id);}for(const n of st.nodes){if(n.p&&!ids.has(n.p))n.p=undefined;}let g=0;for(const n of st.nodes){let cur=n,seen=new Set();while(cur&&cur.p&&g++<10000){if(seen.has(cur.id))throw new Error("cycle at "+cur.id);seen.add(cur.id);cur=st.nodes.find(x=>x.id===cur.p);}}return st;}
 function saveOrg(){_invalidateQuota();try{validateOrg(orgState);}catch(vErr){try{console.error("[saveOrg] validate failed",vErr);}catch(e){}toastError("บันทึกผังองค์กรไม่ได้ — โครงสร้างผิด: "+vErr.message);return false;}try{const k=orgDef().key;const prev=localStorage.getItem(k);if(prev){try{const pp=JSON.parse(prev);if(pp&&Array.isArray(pp.nodes)&&pp.nodes.length)localStorage.setItem(k+".lkg",prev);}catch(e){}}localStorage.setItem(k,JSON.stringify(orgState));try{backupOrgToIDB(orgCompany,orgState);}catch(e){}try{_scheduleSharedPush();}catch(e){}return true;}catch(e){try{console.error("[saveOrg] setItem failed",e);}catch(x){}if(e&&(e.name==="QuotaExceededError"||/quota/i.test(String(e.message)))){toastError("บันทึกผังองค์กรไม่สำเร็จ — พื้นที่เต็ม Export เก็บไว้ก่อน");}else{toastError("บันทึกผังองค์กรไม่สำเร็จ: "+(e&&e.message||e));}return false;}}
 function resetOrg(){if(isLocked){toast(T_LOCKED);return;}if(!confirm(L("รีเซ็ตผังองค์กร ","Reset org chart ")+orgDef().name+L(" กลับค่าเริ่มต้น?"," back to defaults?")))return;const snap=JSON.stringify(orgState);pushOrgUndo();orgState=migrateOrg({version:1,cofounderRemoved:(orgCompany==="thunder"),nodes:JSON.parse(JSON.stringify(orgDef().seed))},orgCompany);const ok=saveOrg();if(!ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();return;}renderOrg();toast(L("รีเซ็ตผังองค์กรแล้ว","Org chart reset"));}
-function switchOrgCompany(c){ if(c===orgCompany||!ORG_DEFS[c])return; orgCompany=c; try{localStorage.setItem("osp.org.company",c);}catch(e){} orgUndoStack=[]; orgRedoStack=[]; /* stacks are per-company — clear so Undo can't write across companies */ orgState=loadOrgState(c); saveOrg(); renderOrg(); updateOrgCompanyUI(); }
+function switchOrgCompany(c){ if(c===orgCompany||!ORG_DEFS[c])return; if(_oKbPick)_oKbClear(); orgCompany=c; try{localStorage.setItem("osp.org.company",c);}catch(e){} orgUndoStack=[]; orgRedoStack=[]; /* stacks are per-company — clear so Undo can't write across companies */ orgState=loadOrgState(c); saveOrg(); renderOrg(); updateOrgCompanyUI(); }
 function renderOrgCompanyTabs(){
   const seg=document.getElementById("ocSeg"); if(!seg)return;
   seg.innerHTML=Object.keys(ORG_DEFS).map(id=>{
@@ -4317,11 +4318,22 @@ function orgBox(rawNode){
     else if(_pr.seat){ const _rm=roomOf(_pr.seat); const _rn=_rm?((_rm.num?_rm.num+" ":"")+_rm.name).replace(/\s*room\s*/ig," ").replace(/\s+/g," ").trim():""; statusLine='<span class="ostat ooffice">'+escapeHtml(_rn||"—")+'</span>'; }
     else { statusLine='<span class="ostat ono">ยังไม่เข้าห้อง</span>'; }
   }
-  return '<div class="'+cls+'" data-id="'+escapeHtml(rawNode.id)+'"'+(n.p?(' data-parent="'+escapeHtml(n.p)+'"'):'')+' tabindex="0" role="button" title="'+escapeHtml(n.name+" — "+(n.en||n.th||"")+" · "+(n.company||"")+(n.critical?" · KEY PERSON":"")+(dr?(" · คุม "+dr+" คน"):""))+'">'+
+  // A pickup only colours this company's boxes: a stale cross-company pickup must NOT relabel nodes here.
+  const _kbActive=(!isLocked&&_oKbPick&&_oKbPick.company===orgCompany);
+  const _kbMoving=(_kbActive&&_oKbPick.id===rawNode.id);
+  // Accessible name carries a context-aware keyboard hint so the action is discoverable by screen reader:
+  //  - a pending pickup on THIS box → Enter/Esc cancels;
+  //  - a pending pickup on another box → Enter/Space makes this person the new manager;
+  //  - no pickup (and unlocked) → Enter edits.
+  const _baseName=n.name+" — "+(n.en||n.th||"")+" · "+(n.company||"")+(n.critical?" · KEY PERSON":"")+(dr?(" · คุม "+dr+" คน"):"");
+  const _kbHint=_kbMoving?L(" — กำลังย้าย, กด Enter หรือ Esc เพื่อยกเลิก"," — moving, press Enter or Esc to cancel")
+    :(_kbActive?L(" — กด Enter เพื่อตั้งเป็นหัวหน้าคนใหม่"," — press Enter to set as the new manager")
+    :(isLocked?"":L(" — กด Enter เพื่อแก้ไข"," — press Enter to edit")));
+  return '<div class="'+cls+'" data-id="'+escapeHtml(rawNode.id)+'"'+(n.p?(' data-parent="'+escapeHtml(n.p)+'"'):'')+' tabindex="0" role="button"'+(isLocked?'':' onkeydown="onOrgBoxKeydown(event,'+attr(rawNode.id)+')"')+(_kbMoving?' aria-grabbed="true"':'')+' aria-label="'+escapeHtml(_baseName+_kbHint)+'" title="'+escapeHtml(_baseName)+'">'+
     '<div class="oav" style="'+avStyle+'">'+avInner+'</div>'+
     '<div class="ometa"><div class="onm">'+escapeHtml(n.name)+'</div>'+(role?'<div class="orole">'+escapeHtml(role)+'</div>':'')+statusLine+'</div>'+
     (badges?('<div class="orisk">'+badges+'</div>'):'')+
-    (isLocked?'':'<div class="oact"><button title="แก้ไข" onclick="event.stopPropagation();editOrgNode('+attr(rawNode.id)+')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button><button title="เพิ่มลูกน้อง" onclick="event.stopPropagation();addOrgUnder('+attr(rawNode.id)+')">+</button></div>')+'</div>';
+    (isLocked?'':'<div class="oact"><button class="omove" title="ย้ายบุคคลนี้ (ไปอยู่ใต้หัวหน้าใหม่)" aria-label="'+escapeHtml("ย้าย "+(n.name||"")+" ไปอยู่ใต้หัวหน้าใหม่")+'" onclick="event.stopPropagation();orgKbPickUp('+attr(rawNode.id)+')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg></button><button title="แก้ไข" onclick="event.stopPropagation();editOrgNode('+attr(rawNode.id)+')"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button><button title="เพิ่มลูกน้อง" onclick="event.stopPropagation();addOrgUnder('+attr(rawNode.id)+')">+</button></div>')+'</div>';
 }
 function exportOrgJSON(){ const payload=Object.assign({__org:orgDef().name,__exportedAt:nowISO(),__company:orgCompany},clone(orgState)); downloadBlob(JSON.stringify(payload,null,2),"org-"+orgCompany+"-"+stamp()+".json","application/json"); toast(L("Export ผังองค์กร ","Org chart exported ")+orgDef().name+L(" แล้ว"," done")); }
 function importOrgJSON(ev){if(isLocked){toast(T_LOCKED_IMPORT);ev.target.value="";return;}const f=ev.target.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{
@@ -4345,6 +4357,9 @@ function restoreOrgLKG(){if(isLocked){toast(T_LOCKED_RESTORE);return;}try{const 
 function restoreOrgFromIDB(){if(isLocked){toast(T_LOCKED_RESTORE);return;}if(!idb){toast(L("ไม่มี backup ผังองค์กร","No org chart backup"));return;}try{const tx=idb.transaction(IDB_ORG_STORE,"readonly");const req=tx.objectStore(IDB_ORG_STORE).getAll();req.onsuccess=()=>{try{const rows=(req.result||[]).filter(r=>r.company===orgCompany).sort((a,b)=>a.ts.localeCompare(b.ts));if(!rows.length){toast(L("ไม่มี backup ผังองค์กร","No org chart backup"));return;}const snap=orgSnapshot();let picked=null;for(let i=rows.length-1;i>=0;i--){try{const cand=migrateOrg(clone(rows[i].state),orgCompany);validateOrg(cand);picked=cand;break;}catch(vE){try{console.error("[restoreOrgFromIDB] skip",rows[i].ts,vE);}catch(x){}}}if(!picked){toastError("Backup ผังองค์กรเสียหายทุกสำเนา");return;}pushOrgUndo();orgState=picked;const ok=saveOrg();if(!ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();return;}renderOrg();toast(L("กู้คืนผังองค์กรจาก backup แล้ว","Org chart restored from backup"));}catch(e){toastError("กู้คืนไม่สำเร็จ: "+(e&&e.message||e));}};req.onerror=()=>toastError("อ่าน backup ผังองค์กรไม่สำเร็จ");}catch(e){toastError("กู้คืนไม่สำเร็จ: "+(e&&e.message||e));}}
 function renderOrg(){
   const org=document.getElementById("org"); if(!org)return;
+  // Drop a pending keyboard pickup that can no longer be valid before we re-render (which reads _oKbPick for
+  // aria-grabbed): locked, switched company, or the source node no longer exists. Keeps ARIA + state honest.
+  if(_oKbPick&&(isLocked||_oKbPick.company!==orgCompany||!orgState.nodes.find(x=>x.id===_oKbPick.id)))_oKbClear();
   let html='';
   orgLevels().forEach((lvl,li)=>{
     let cells='';
@@ -4443,19 +4458,88 @@ function applyOrgDrop(id,t){
   if(isLocked){toast(T_LOCKED);return;}
   const n=orgState.nodes.find(x=>x.id===id); if(!n)return;
   const snap=JSON.stringify(orgState);
-  pushOrgUndo();
-  if(t.type==="parent"){ if(t.id===id||isAncestor(id,t.id)){toast(L("ย้ายไปเป็นลูกของตัวเอง/สายเดียวกันไม่ได้","Can't move under itself/its own line"));return;} const par=orgState.nodes.find(x=>x.id===t.id); if(!par){return;} if(!Number.isFinite(par.lv)){toast(L("โหนดต้นทางเสีย ย้ายไม่ได้","Source node is broken, can't move"));return;} n.p=t.id; n.lv=Math.min(orgLevels().length-1,par.lv+1); n.col=par.col; }
+  // pushOrgUndo() is deferred to AFTER each branch's guards pass, so a rejected move (self/ancestor/broken
+  // parent / invalid cell) leaves orgState + undo/redo stacks byte-identical — no spurious undo entry.
+  if(t.type==="parent"){
+    if(t.id===id||isAncestor(id,t.id)){toast(L("ย้ายไปเป็นลูกของตัวเอง/สายเดียวกันไม่ได้","Can't move under itself/its own line"));return;}
+    const par=orgState.nodes.find(x=>x.id===t.id); if(!par){return;}
+    if(!Number.isFinite(par.lv)){toast(L("โหนดต้นทางเสีย ย้ายไม่ได้","Source node is broken, can't move"));return;}
+    pushOrgUndo();
+    n.p=t.id; n.lv=Math.min(orgLevels().length-1,par.lv+1); n.col=par.col;
+  }
   else {
-    if(!Number.isFinite(t.lv)||t.lv<0||t.lv>=orgLevels().length){toast(L("ตำแหน่งปลายทางไม่ถูกต้อง","Invalid target position"));try{orgState=JSON.parse(snap);}catch(e){}return;}
+    if(!Number.isFinite(t.lv)||t.lv<0||t.lv>=orgLevels().length){toast(L("ตำแหน่งปลายทางไม่ถูกต้อง","Invalid target position"));return;}
     const par=n.p?orgState.nodes.find(x=>x.id===n.p):null;
-    if(par&&Number.isFinite(par.lv)&&t.lv<=par.lv){toast(L("ห้ามย้ายไปเหนือหัวหน้าโดยตรง","Can't move above the direct manager"));try{orgState=JSON.parse(snap);}catch(e){}return;}
+    if(par&&Number.isFinite(par.lv)&&t.lv<=par.lv){toast(L("ห้ามย้ายไปเหนือหัวหน้าโดยตรง","Can't move above the direct manager"));return;}
     let hasDescendantAbove=false;
     for(const other of orgState.nodes){if(other.id===n.id)continue;if(isAncestor(n.id,other.id)&&Number.isFinite(other.lv)&&other.lv<=t.lv){hasDescendantAbove=true;break;}}
-    if(hasDescendantAbove){toast(L("มีลูกน้องอยู่ระดับเดียวกัน/สูงกว่า","A report is at the same/higher level"));try{orgState=JSON.parse(snap);}catch(e){}return;}
+    if(hasDescendantAbove){toast(L("มีลูกน้องอยู่ระดับเดียวกัน/สูงกว่า","A report is at the same/higher level"));return;}
+    pushOrgUndo();
     n.lv=t.lv; n.col=t.col;
   }
   const ok=saveOrg(); if(!ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();requestAnimationFrame(drawOrgLinks);return;}
   renderOrg(); requestAnimationFrame(drawOrgLinks); toast(L("ย้าย ","Moved ")+n.name+L(" แล้ว"," done"));
+}
+/* ===================== Keyboard org move (a11y) — parallel to pointer drag; PARENT-MOVE ONLY =====================
+   Model: a native "ย้ายบุคคลนี้" button on each occupied org box starts a pickup (never steals the Enter/Space that
+   opens edit). While a pickup is pending, Enter/Space on ANOTHER org box places the person under it as a new parent
+   via applyOrgDrop({type:"parent"}) — reusing every existing constraint (self/ancestor/broken-parent), level/column
+   derivation, save/rollback and link redraw. Esc — or re-triggering on the same source box — cancels. No new drag
+   engine, no cross-level/column freedom, no sibling reorder, no empty-cell target: those stay pointer-only. */
+let _oKbPick=null; // { id } of the node picked up for a keyboard parent-move; independent of the pointer `odrag`.
+function _oKbClear(){ // drop any pending pickup + strip stale aria-grabbed left in the DOM
+  _oKbPick=null;
+  try{document.querySelectorAll('.obox[aria-grabbed="true"]').forEach(el=>el.setAttribute("aria-grabbed","false"));}catch(e){}
+}
+function _oKbFocus(id){ // restore focus to an org box by id after renderOrg() rebuilds the DOM; fall back to #org
+  try{const el=document.querySelector('.obox[data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):String(id).replace(/"/g,'\\"'))+'"]'); if(el&&el.focus){el.focus();return true;}}catch(e){}
+  try{const org=document.getElementById("org"); if(org&&org.focus){org.focus();}}catch(e){}
+  return false;
+}
+function orgKbPickUp(id){ // start (or toggle-cancel) a keyboard parent-move from the box's "ย้ายบุคคลนี้" button
+  if(isLocked){ if(_oKbPick)_oKbClear(); return; }
+  const n=orgState.nodes.find(x=>x.id===id); if(!n)return;
+  if(_oKbPick&&_oKbPick.id===id){ _oKbClear(); _srAnnounce(L("ยกเลิกการย้าย","Move cancelled")); _oKbFocus(id); return; }
+  _oKbPick={id, company:orgCompany};
+  try{const src=document.querySelector('.obox[data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):String(id).replace(/"/g,'\\"'))+'"]'); if(src)src.setAttribute("aria-grabbed","true");}catch(x){}
+  _srAnnounce(L("หยิบ ","Picked up ")+(n.name||"")+L(" — ไปที่หัวหน้าคนใหม่แล้วกด Enter เพื่อวางเป็นลูกน้อง, Esc ยกเลิก"," — move to the new manager and press Enter to place as a report, Esc to cancel"));
+  _oKbFocus(id);
+}
+function onOrgBoxKeydown(e,id){ // per-box handler: places a pending pickup, else stays out of the way of edit/Enter
+  const key=e.key;
+  // Only the box ITSELF pick/places. A keydown that originated on an inner control (.oact move/edit/add button)
+  // bubbles up to this .obox handler too — ignore it, or we'd BOTH run a place here AND let the button fire its
+  // own action (double-action: place-then-repick, or same-box-cancel-then-repick). Let the child own its key.
+  if(e.target&&e.target!==e.currentTarget&&e.target.closest&&e.target.closest(".oact"))return;
+  if(key==="Escape"){ if(_oKbPick){ e.preventDefault();e.stopPropagation(); _oKbClear(); _srAnnounce(L("ยกเลิกการย้าย","Move cancelled")); } return; }
+  if(key!=="Enter"&&key!==" "&&key!=="Spacebar")return;
+  if(!_oKbPick)return;                 // no pickup pending → let the global handler run editOrgNode as usual
+  // We own this Enter/Space — stop it bubbling to the global keydown handler, which would ALSO editOrgNode the
+  // target box on the same key (double action). Same lesson as the seat keyboard slice.
+  e.preventDefault();e.stopPropagation();
+  if(isLocked){ _oKbClear(); return; }
+  const pick=_oKbPick;
+  if(id===pick.id){ _oKbClear(); _srAnnounce(L("ยกเลิกการย้าย","Move cancelled")); _oKbFocus(id); return; } // same box = cancel
+  // Company guard: a pickup is only valid within the company it was started in. Node IDs can repeat across
+  // companies, so placing a stale cross-company pickup could move the wrong same-ID node. Abort if switched.
+  if(pick.company!==orgCompany){ _oKbClear(); _srAnnounce(L("ยกเลิกการย้าย (เปลี่ยนบริษัท)","Move cancelled (company changed)")); return; }
+  const src=orgState.nodes.find(x=>x.id===pick.id);
+  if(!src){ _oKbClear(); return; }     // source vanished underneath (stale) — abort silently
+  const target=orgState.nodes.find(x=>x.id===id);
+  if(!target){ _oKbClear(); _srAnnounce(L("ปลายทางหายไป ยกเลิก","Target gone, cancelled")); _oKbFocus(pick.id); return; }
+  const srcName=src.name||"";
+  _oKbClear();
+  applyOrgDrop(pick.id,{type:"parent",id});
+  // Announce success ONLY if the parent actually changed to the target (applyOrgDrop rejects self/ancestor/broken,
+  // or rolls back on save failure). Read back the live state — never trust the call to have taken effect.
+  const after=orgState.nodes.find(x=>x.id===pick.id);
+  if(after&&after.p===id){
+    _srAnnounce(L("ย้าย ","Moved ")+srcName+L(" ไปอยู่ใต้ ","— now reports to ")+(target.name||"")+L(" แล้ว"," "));
+    _oKbFocus(pick.id); // follow the person to their re-rendered box
+  }else{
+    _srAnnounce(L("ย้ายไม่สำเร็จ","Move failed")); // rejected or save-failed/rolled-back — do NOT claim success
+    _oKbFocus(pick.id);
+  }
 }
 /* ----- org CRUD ----- */
 let editingOrgId=null;
