@@ -2108,13 +2108,21 @@ function save(){_invalidateQuota();if(state.meta)state.meta.lastSavedAt=nowISO()
 /* ============ SHARED REALTIME STATE — everyone with the link edits ONE dataset (KV, last-write-wins) ============ */
 var _sharedVer=0,_sharedPushT=null,_applyingShared=false,_sharedPolling=false,_sharedReady=false,_sharedOn=true;
 var _sharedConflict=null; // {local:bundle, server:bundle, ver:serverVer} — set on 409 so the user chooses instead of silent last-write-wins
+var _sharedEditGen=0; // bumped on every local edit; lets keep-mine detect edits that landed WHILE its request was in-flight (avoids the JSON.stringify/fetch-vs-edit race — a stale "mine" would otherwise win and drop the newer edit)
 function _gatherShared(){
   const orgs={};
   try{Object.keys(ORG_DEFS).forEach(c=>{try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(raw)orgs[ORG_DEFS[c].key]=JSON.parse(raw);}catch(e){}});}catch(e){}
   let tp=null,vw=null; try{tp=JSON.parse(localStorage.getItem("osp.templates.v1"));}catch(e){} try{vw=JSON.parse(localStorage.getItem("osp.views.v1"));}catch(e){}
   return {state:clone(state),orgs:orgs,orgCompanies:(function(){try{return loadUserOrgCompanies();}catch(e){return [];}})(),templates:tp,views:vw};
 }
-function _scheduleSharedPush(){ if(!_sharedOn||!_sharedReady||_applyingShared||_sharedConflict)return; if(_sharedPushT)clearTimeout(_sharedPushT); _sharedPushT=setTimeout(_sharedPushNow,700); }
+function _scheduleSharedPush(){ if(!_sharedOn||!_sharedReady||_applyingShared)return;
+  _sharedEditGen++; // this edit happened now — record it so an in-flight keep-mine knows a newer snapshot exists
+  if(_sharedConflict){ // conflict pending: don't push (only the resolver may write), but keep "mine" fresh so the banner diff + a future keep-mine reflect THIS edit, not the stale snapshot captured at 409 time
+    try{_sharedConflict.local=_gatherShared();}catch(e){}
+    try{renderBanners();}catch(e){}
+    return;
+  }
+  if(_sharedPushT)clearTimeout(_sharedPushT); _sharedPushT=setTimeout(_sharedPushNow,700); }
 function _sharedPushNow(){ _sharedPushT=null; if(!_sharedOn)return Promise.resolve(false); if(_sharedConflict)return Promise.resolve(false); /* conflict pending: only the resolver may write — a raw push here would silently win as "mine" bypassing the banner choice */ let payload; try{payload=_gatherShared();}catch(e){return Promise.resolve(false);}
   return fetch("/api/state",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({data:payload,baseVer:_sharedVer})})
     .then(r=>r.json().then(j=>({s:r.status,ok:r.ok,j})).catch(()=>({s:r.status,ok:r.ok,j:null})))
@@ -2215,9 +2223,15 @@ function _pushBundle(bundle,baseVer){
 }
 function _resolveConflictKeepMine(){
   const c=_sharedConflict; if(!c)return;
+  const startGen=_sharedEditGen; const mine=c.local; // snapshot we're about to assert; startGen lets us detect edits that land while this request is in-flight
   toast(L("กำลังยืนยันงานของฉันขึ้นฐานกลาง…","Re-asserting my version…"));
-  _pushBundle(c.local,c.ver).then(res=>{
-    if(res.ok){ _sharedConflict=null; try{renderBanners();}catch(e){} toast(L("ใช้งานของฉันแล้ว · sync ทุกคน ✓","Kept mine · synced ✓")); return; }
+  _pushBundle(mine,c.ver).then(res=>{
+    if(res.ok){ _sharedConflict=null; try{renderBanners();}catch(e){}
+      if(_sharedEditGen!==startGen){ // the user edited again while our keep-mine was in-flight — the accepted "mine" is now stale; push the current snapshot with the fresh ver so that edit isn't dropped (a plain _scheduleSharedPush no-ops the debounce path once conflict is cleared, so we push here). A 409 on this deferred push re-opens the conflict via _sharedPushNow's normal flow.
+        try{if(_sharedPushT){clearTimeout(_sharedPushT);_sharedPushT=null;}}catch(e){} try{_sharedPushNow();}catch(e){}
+        toast(L("ใช้งานของฉันแล้ว · กำลัง sync งานที่แก้เพิ่ม…","Kept mine · syncing the follow-up edit…")); return;
+      }
+      toast(L("ใช้งานของฉันแล้ว · sync ทุกคน ✓","Kept mine · synced ✓")); return; }
     if(res.status===409&&res.j&&res.j.data){ // someone edited AGAIN while we were re-asserting — refresh the conflict, keep the banner
       _sharedVer=(res.j.ver|0); _sharedConflict={local:c.local,server:res.j.data,ver:(res.j.ver|0)};
       try{renderBanners();}catch(e){} toast(L("มีคนแก้อีกครั้งระหว่างยืนยัน — ตรวจแล้วเลือกใหม่","Someone edited again while re-asserting — review & choose again")); return;
@@ -2229,8 +2243,13 @@ function _resolveConflictKeepMine(){
 function _resolveConflictUseTheirs(){
   const c=_sharedConflict; if(!c)return;
   const applied=_applyShared(c.server); // atomic; validates server bundle
-  _sharedConflict=null; try{renderBanners();}catch(e){}
-  toast(applied?L("ใช้งานของทีมแล้ว","Using team’s version"):L("งานของทีมใช้ไม่ได้ (ข้อมูลไม่ผ่านตรวจ) — คงงานเดิมไว้","Team’s version was invalid — kept yours"));
+  // Only discard "mine" + the deferred edits once the server bundle is actually adopted. If _applyShared() fails
+  // (invalid server bundle, or a commit/rollback error), clearing the conflict here would strand "mine" with NO
+  // banner — the next edit would then push mine over server on a fresh _sharedVer with no conflict shown = silent
+  // data loss. So on failure keep the conflict + latest c.local intact for retry; no push happens either way.
+  if(applied){ _sharedConflict=null; }
+  try{renderBanners();}catch(e){}
+  toast(applied?L("ใช้งานของทีมแล้ว","Using team’s version"):L("งานของทีมใช้ไม่ได้ (ข้อมูลไม่ผ่านตรวจ) — คงงานเดิมไว้ เลือกใหม่ได้","Team’s version was invalid — kept yours, choose again"));
 }
 function _showConflictDiff(){
   const c=_sharedConflict; if(!c)return;
@@ -3616,7 +3635,7 @@ function _unlinkPersonFromAllOrg(pid){
   if(activeTouched)activeOk=saveOrg();
   Object.keys(ORG_DEFS).forEach(c=>{
     if(ORG_DEFS[c].key===orgDef().key)return; // active store already handled
-    try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(!raw)return;const obj=JSON.parse(raw);let t2=false;(obj.nodes||[]).forEach(n=>{if(n.personId===pid){n.personId=undefined;t2=true;}});if(t2)localStorage.setItem(ORG_DEFS[c].key,JSON.stringify(obj));}catch(e){}
+    try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(!raw)return;const obj=JSON.parse(raw);let t2=false;(obj.nodes||[]).forEach(n=>{if(n.personId===pid){n.personId=undefined;t2=true;}});if(t2)_saveInactiveOrg(c,obj);}catch(e){}
   });
   return activeOk;
 }
@@ -3629,7 +3648,7 @@ function repairOrgPersonLinks(){
   (orgState.nodes||[]).forEach(n=>{ if(n.personId&&!live.has(n.personId)){ n.personId=undefined; activeFixed++; } });
   Object.keys(ORG_DEFS).forEach(c=>{
     if(ORG_DEFS[c].key===orgDef().key)return; // active handled in-memory above
-    try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(!raw)return;const obj=JSON.parse(raw);let t2=false;(obj.nodes||[]).forEach(n=>{if(n.personId&&!live.has(n.personId)){n.personId=undefined;t2=true;}});if(t2)localStorage.setItem(ORG_DEFS[c].key,JSON.stringify(obj));}catch(e){}
+    try{const raw=localStorage.getItem(ORG_DEFS[c].key);if(!raw)return;const obj=JSON.parse(raw);let t2=false;(obj.nodes||[]).forEach(n=>{if(n.personId&&!live.has(n.personId)){n.personId=undefined;t2=true;}});if(t2)_saveInactiveOrg(c,obj);}catch(e){}
   });
   return activeFixed;
 }
@@ -4188,6 +4207,24 @@ function migrateOrg(st,company){
 }
 function validateOrg(st){if(!st||typeof st!=="object"||!Array.isArray(st.nodes))throw new Error("org state shape");const ids=new Set();for(const n of st.nodes){if(!n||typeof n!=="object")throw new Error("bad org node");if(!n.id||typeof n.id!=="string")throw new Error("org node id");if(ids.has(n.id))throw new Error("dup org id "+n.id);ids.add(n.id);if(!Number.isFinite(n.lv))throw new Error("org lv NaN "+n.id);if(n.p===n.id)throw new Error("self parent "+n.id);}for(const n of st.nodes){if(n.p&&!ids.has(n.p))n.p=undefined;}let g=0;for(const n of st.nodes){let cur=n,seen=new Set();while(cur&&cur.p&&g++<10000){if(seen.has(cur.id))throw new Error("cycle at "+cur.id);seen.add(cur.id);cur=st.nodes.find(x=>x.id===cur.p);}}return st;}
 function saveOrg(){_invalidateQuota();try{validateOrg(orgState);}catch(vErr){try{console.error("[saveOrg] validate failed",vErr);}catch(e){}toastError("บันทึกผังองค์กรไม่ได้ — โครงสร้างผิด: "+vErr.message);return false;}try{const k=orgDef().key;const prev=localStorage.getItem(k);if(prev){try{const pp=JSON.parse(prev);if(pp&&Array.isArray(pp.nodes)&&pp.nodes.length)localStorage.setItem(k+".lkg",prev);}catch(e){}}localStorage.setItem(k,JSON.stringify(orgState));try{backupOrgToIDB(orgCompany,orgState);}catch(e){}try{_scheduleSharedPush();}catch(e){}return true;}catch(e){try{console.error("[saveOrg] setItem failed",e);}catch(x){}if(e&&(e.name==="QuotaExceededError"||/quota/i.test(String(e.message)))){toastError("บันทึกผังองค์กรไม่สำเร็จ — พื้นที่เต็ม Export เก็บไว้ก่อน");}else{toastError("บันทึกผังองค์กรไม่สำเร็จ: "+(e&&e.message||e));}return false;}}
+// Persist an INACTIVE org store (a company that isn't the one currently loaded into orgState).
+// Mirrors saveOrg()'s safety net for the non-active path: validate → keep last-known-good → write → IDB backup →
+// schedule a shared push. Callers that used to write ORG_DEFS[c].key directly (bypassing the push) must use this
+// so the change is reflected in the shared version — otherwise a later push silently carries it with a stale ver.
+// Returns true on success, false (with a toast) on validation/quota failure so the caller can bail.
+function _saveInactiveOrg(company,obj){
+  const def=ORG_DEFS[company]; if(!def)return false;
+  const k=def.key;
+  try{validateOrg(obj);}catch(vErr){try{console.error("[_saveInactiveOrg] validate failed",company,vErr);}catch(e){}toastError("บันทึกผังองค์กรไม่ได้ — โครงสร้างผิด: "+vErr.message);return false;}
+  try{
+    const prev=localStorage.getItem(k);
+    if(prev){try{const pp=JSON.parse(prev);if(pp&&Array.isArray(pp.nodes)&&pp.nodes.length)localStorage.setItem(k+".lkg",prev);}catch(e){}}
+    localStorage.setItem(k,JSON.stringify(obj));
+  }catch(e){try{console.error("[_saveInactiveOrg] setItem failed",company,e);}catch(x){}if(e&&(e.name==="QuotaExceededError"||/quota/i.test(String(e.message)))){toastError("บันทึกผังองค์กรไม่สำเร็จ — พื้นที่เต็ม Export เก็บไว้ก่อน");}else{toastError("บันทึกผังองค์กรไม่สำเร็จ: "+(e&&e.message||e));}return false;}
+  try{backupOrgToIDB(company,obj);}catch(e){}
+  try{_scheduleSharedPush();}catch(e){}
+  return true;
+}
 function resetOrg(){if(isLocked){toast(T_LOCKED);return;}if(!confirm(L("รีเซ็ตผังองค์กร ","Reset org chart ")+orgDef().name+L(" กลับค่าเริ่มต้น?"," back to defaults?")))return;const snap=JSON.stringify(orgState);pushOrgUndo();orgState=migrateOrg({version:1,cofounderRemoved:(orgCompany==="thunder"),nodes:JSON.parse(JSON.stringify(orgDef().seed))},orgCompany);const ok=saveOrg();if(!ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();return;}renderOrg();toast(L("รีเซ็ตผังองค์กรแล้ว","Org chart reset"));}
 function switchOrgCompany(c){ if(c===orgCompany||!ORG_DEFS[c])return; if(_oKbPick)_oKbClear(); orgCompany=c; try{localStorage.setItem("osp.org.company",c);}catch(e){} orgUndoStack=[]; orgRedoStack=[]; /* stacks are per-company — clear so Undo can't write across companies */ orgState=loadOrgState(c); saveOrg(); renderOrg(); updateOrgCompanyUI(); }
 function renderOrgCompanyTabs(){
@@ -4790,7 +4827,7 @@ function confirmLinkOrg(){
     const ok=saveOrg();if(!ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();return;}
     renderOrg();requestAnimationFrame(drawOrgLinks);
   }else{
-    try{const prev=localStorage.getItem(key);if(prev)localStorage.setItem(key+".lkg",prev);localStorage.setItem(key,JSON.stringify(orgObj));}catch(e){toastError("บันทึกไม่สำเร็จ: "+(e&&e.message||e));return;}
+    if(!_saveInactiveOrg(company,orgObj))return;
   }
   closeModal("linkOrgModal");
   renderSettings();
@@ -4806,7 +4843,7 @@ function unlinkPersonFromOrg(personId,company,nodeId){
     const ok=saveOrg();if(!ok){try{orgState=JSON.parse(snap);}catch(e){}renderOrg();return;}
     renderOrg();requestAnimationFrame(drawOrgLinks);
   }else{
-    try{const raw=localStorage.getItem(key);const obj=raw?JSON.parse(raw):null;if(!obj||!Array.isArray(obj.nodes))return;const node=obj.nodes.find(n=>n.id===nodeId); if(!node)return;node.personId=undefined;localStorage.setItem(key,JSON.stringify(obj));}catch(e){toastError("บันทึกไม่สำเร็จ: "+(e&&e.message||e));return;}
+    try{const raw=localStorage.getItem(key);const obj=raw?JSON.parse(raw):null;if(!obj||!Array.isArray(obj.nodes))return;const node=obj.nodes.find(n=>n.id===nodeId); if(!node)return;node.personId=undefined;if(!_saveInactiveOrg(company,obj))return;}catch(e){toastError("บันทึกไม่สำเร็จ: "+(e&&e.message||e));return;}
   }
   openLinkOrgModal(personId);
   renderSettings();
